@@ -1,0 +1,87 @@
+/* Body & Centering */
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+    background-color: #0f172a;
+    color: white;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+}
+
+/* Main App Container */
+.container {
+    background-color: #1e293b;
+    padding: 30px;
+    border-radius: 15px;
+    width: 380px;
+    max-width: 95%;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+    text-align: center;
+}
+
+/* Titles */
+h1 {
+    margin-bottom: 20px;
+    font-size: 24px;
+}
+
+h2 {
+    font-size: 18px;
+    margin-bottom: 10px;
+}
+
+/* Section spacing */
+.section {
+    background-color: #273449;
+    padding: 15px;
+    margin-bottom: 20px;
+    border-radius: 10px;
+}
+
+/* Inputs & Textarea */
+input, textarea {
+    width: 90%;
+    padding: 10px;
+    margin: 8px 0;
+    border-radius: 8px;
+    border: none;
+    font-size: 14px;
+}
+
+textarea {
+    resize: none;
+    height: 80px;
+}
+
+/* Buttons */
+button {
+    width: 95%;
+    padding: 12px;
+    margin-top: 10px;
+    background-color: #22c55e;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    color: white;
+    cursor: pointer;
+}
+
+button:hover {
+    background-color: #16a34a;
+}
+
+/* Lists */
+ul {
+    text-align: left;
+    margin-top: 10px;
+    padding-left: 20px;
+}
+
+/* Trade Decision & Risk Result */
+#tradeDecision, #result {
+    margin-top: 12px;
+    font-size: 16px;
+    font-weight: bold;
+}
