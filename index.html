@@ -2,53 +2,840 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Forex Trading Buddy</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <title>Forex Trading Buddy — Professional Trading Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* Quick mobile fixes */
+        @media (max-width: 768px) {
+            .sidebar { transform: translateX(-100%); }
+            .sidebar:not(.collapsed) { transform: translateX(0); }
+            .main-content { margin-left: 0; }
+            .navbar-center { display: none; }
+            .mobile-menu-btn { display: block !important; background: #22c55e; border: none; color: white; padding: 8px; border-radius: 4px; cursor: pointer; }
+            .cards-grid { grid-template-columns: 1fr !important; }
+            .navbar-right { gap: 8px; }
+            .nav-stat { font-size: 12px; }
+        }
+    </style>
 </head>
 <body>
 
-<div class="container">
-    <h1>Forex Trading Buddy</h1>
-
-    <!-- Strategy Section -->
-    <div class="section">
-        <h2>My Strategy</h2>
-        <textarea id="strategyInput" placeholder="Write your trading strategy here..."></textarea>
-        <button onclick="saveStrategy()">Save Strategy</button>
+<!-- NAVBAR -->
+<nav class="navbar">
+    <div class="navbar-left">
+        <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
+        <div class="navbar-branding">
+            <img id="navbarLogo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2322c55e'/%3E%3Ctext x='50' y='60' font-size='60' text-anchor='middle' fill='%23000' font-weight='bold'%3EFB%3C/text%3E%3C/svg%3E" alt="Logo" class="navbar-logo-img" title="Click to customize logo">
+            <span class="navbar-title">ForexBuddy</span>
+        </div>
     </div>
-
-    <!-- Trade Criteria Section -->
-    <div class="section">
-        <h2>Trade Criteria</h2>
-        <input type="text" id="criteriaInput" placeholder="Enter a trade criteria">
-        <button onclick="addCriteria()">Add Criteria</button>
-        <ul id="criteriaList"></ul>
+    <div class="navbar-center">
+        <button class="nav-btn active" onclick="navigateTo('home')">Home</button>
+        <button class="nav-btn" onclick="navigateTo('journal')">Journal</button>
+        <button class="nav-btn" onclick="navigateTo('analytics')">Analytics</button>
+        <button class="nav-btn" onclick="navigateTo('settings')">Settings</button>
     </div>
-
-    <!-- Devil's Lies Section -->
-    <div class="section">
-        <h2>Devil's Lies (No-Go Rules)</h2>
-        <input type="text" id="devilInput" placeholder="Enter a no-go rule">
-        <button onclick="addDevil()">Add Rule</button>
-        <ul id="devilList"></ul>
+    <div class="navbar-right">
+        <!-- Mobile menu button -->
+        <button class="mobile-menu-btn" onclick="toggleMobileMenu()" style="display:none;">☰</button>
+        <div class="nav-stat"><span class="nav-stat-label">Trades</span><span class="nav-stat-value" id="navTrades">0</span></div>
+        <div class="nav-stat"><span class="nav-stat-label">Win%</span><span class="nav-stat-value" id="navWinRate">0%</span></div>
+        <div class="nav-stat"><span class="nav-stat-label">PnL</span><span class="nav-stat-value" id="navPnL">0</span></div>
+        <div class="nav-stat"><span class="nav-stat-label">Score</span><span class="nav-stat-value" id="navScore">--</span></div>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
     </div>
+</nav>
 
-    <!-- Start Today's Trade -->
-    <div class="section">
-        <button onclick="evaluateTrade()">Start Today's Trade</button>
-        <h3 id="tradeDecision"></h3>
+<!-- SIDEBAR -->
+<aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+        <h3>Quick Filters</h3>
+        <button class="sidebar-close" onclick="toggleSidebar()">✕</button>
     </div>
+    <div class="sidebar-content">
+        <div class="sidebar-widget">
+            <h4 class="widget-title">📈 Quick Stats</h4>
+            <div class="stat-mini"><span>Total P/L:</span><span class="stat-value-mini" id="sidebarPL">$0</span></div>
+            <div class="stat-mini"><span>Wins Today:</span><span class="stat-value-mini" id="sidebarWinsToday">0</span></div>
+            <div class="stat-mini"><span>Max Drawdown:</span><span class="stat-value-mini" id="sidebarDrawdown">0%</span></div>
+        </div>
+        <div class="sidebar-widget">
+            <h4 class="widget-title">⚙ Filters</h4>
+            <label class="filter-label">Date Range</label>
+            <input type="date" id="sidebar_dateStart" class="filter-input">
+            <input type="date" id="sidebar_dateEnd" class="filter-input">
+            <label class="filter-label">Strategy</label>
+            <select id="sidebar_strategy" class="filter-input"><option value="">All Strategies</option></select>
+            <label class="filter-label">Currency Pair</label>
+            <select id="sidebar_pair" class="filter-input"><option value="">All Pairs</option></select>
+            <label class="filter-label">Emotion State</label>
+            <select id="sidebar_emotion" class="filter-input">
+                <option value="">All Emotions</option>
+                <option value="Calm">Calm</option>
+                <option value="Angry">Angry</option>
+                <option value="FOMO">FOMO</option>
+                <option value="Frustrated">Frustrated</option>
+            </select>
+            <label class="filter-label">Outcome</label>
+            <select id="sidebar_outcome" class="filter-input">
+                <option value="">All Outcomes</option>
+                <option value="Win">Wins</option>
+                <option value="Loss">Losses</option>
+                <option value="BE">Break-Even</option>
+            </select>
+            <button class="btn-primary btn-small" onclick="applySidebarFilters()">Apply</button>
+            <button class="btn-secondary btn-small" onclick="clearSidebarFilters()">Reset</button>
+        </div>
+        <div class="sidebar-widget">
+            <h4 class="widget-title">⚡ Quick Links</h4>
+            <button class="sidebar-link" onclick="navigateTo('journal'); toggleSidebar()">+ New Trade Entry</button>
+            <button class="sidebar-link" onclick="openRulesModal()">Edit Rules</button>
+            <button class="sidebar-link" onclick="openRiskModal()">Risk Settings</button>
+            <button class="sidebar-link" onclick="quickStartTrade()">Quick Start Trade</button>
+        </div>
+    </div>
+</aside>
 
-    <!-- Risk Calculator -->
-    <div class="section">
-        <h2>Risk Calculator</h2>
-        <input type="number" id="balance" placeholder="Account Balance">
-        <input type="number" id="risk" placeholder="Risk % per trade">
-        <button onclick="calculateRisk()">Calculate Risk</button>
-        <h3 id="result"></h3>
+<!-- MAIN CONTENT -->
+<main class="main-content">
+
+<!-- HOME SECTION -->
+<section id="homeSection" class="content-section active">
+    <div class="section-header">
+        <h2>Trading Dashboard</h2>
+        <p class="section-subtitle">Welcome back! Here's your trading overview.</p>
+    </div>
+    <div class="cards-grid">
+        <div class="card card-stat">
+            <div class="card-icon">📊</div>
+            <div class="card-content">
+                <span class="card-label">Total Trades</span>
+                <span class="card-value" id="dashTotalTrades">0</span>
+            </div>
+        </div>
+        <div class="card card-stat">
+            <div class="card-icon">📈</div>
+            <div class="card-content">
+                <span class="card-label">Win Rate</span>
+                <span class="card-value" id="dashWinRate">0%</span>
+            </div>
+        </div>
+        <div class="card card-stat">
+            <div class="card-icon">💰</div>
+            <div class="card-content">
+                <span class="card-label">Total P/L</span>
+                <span class="card-value card-value-pnl" id="dashTotalPL">$0</span>
+            </div>
+        </div>
+        <div class="card card-stat">
+            <div class="card-icon">🎯</div>
+            <div class="card-content">
+                <span class="card-label">Profit Factor</span>
+                <span class="card-value" id="dashProfitFactor">0</span>
+            </div>
+        </div>
+        <div class="card card-stat">
+            <div class="card-icon">⚖️</div>
+            <div class="card-content">
+                <span class="card-label">Avg R:R</span>
+                <span class="card-value" id="dashAvgRR">0</span>
+            </div>
+        </div>
+        <div class="card card-stat">
+            <div class="card-icon">🛡️</div>
+            <div class="card-content">
+                <span class="card-label">Discipline Score</span>
+                <span class="card-value" id="dashDisciplineScore">--</span>
+            </div>
+        </div>
+    </div>
+    <div class="home-cta">
+        <button class="btn-primary btn-large" id="startTradeBtn" disabled onclick="startPrompts()">▶ Start Today's Trade</button>
+    </div>
+    <div class="charts-grid">
+        <div class="card chart-card">
+            <h4>Recent P/L Trend</h4>
+            <canvas id="homeEquityChart" height="150"></canvas>
+        </div>
+        <div class="card chart-card">
+            <h4>Win/Loss Distribution</h4>
+            <canvas id="homeWLChart" height="150"></canvas>
+        </div>
+    </div>
+    <div class="card trades-preview-card">
+        <h3>Recent Trades</h3>
+        <div class="trades-preview-table">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Pair</th>
+                        <th>Direction</th>
+                        <th>Outcome</th>
+                        <th>Confidence</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody id="recentTradesBody">
+                    <tr><td colspan="5" class="empty-state">No trades yet</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    <div class="card alerts-card">
+        <h3>⚠️ Alerts & Insights</h3>
+        <div id="homeAlerts" class="alerts-list"></div>
+    </div>
+</section>
+
+<!-- JOURNAL SECTION -->
+<section id="journalSection" class="content-section">
+    <div class="section-header">
+        <h2>Trading Journal</h2>
+        <p class="section-subtitle">Record and manage your trading activity.</p>
+    </div>
+    <div class="journal-grid">
+        <div class="card form-card">
+            <h3>📝 New Trade Entry</h3>
+            <form id="tradeForm" class="trade-form">
+                <div class="form-group">
+                    <label>Currency Pair</label>
+                    <input type="text" id="pair" placeholder="e.g., EURUSD" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Direction</label>
+                        <select id="idea_direction" required>
+                            <option value="">Select...</option>
+                            <option value="Buy">Buy</option>
+                            <option value="Sell">Sell</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Strategy</label>
+                        <select id="form_strategy">
+                            <option value="">Select...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Entry Price</label>
+                        <input type="number" id="entry" placeholder="1.0500" step="0.0001" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Stop Loss</label>
+                        <input type="number" id="stopLoss" placeholder="1.0400" step="0.0001" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Take Profit</label>
+                        <input type="number" id="takeProfit" placeholder="1.0600" step="0.0001" required>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Confidence Level</label>
+                        <select id="confidence" required>
+                            <option value="">Select...</option>
+                            <option value="1">Very Low (1)</option>
+                            <option value="2">Low (2)</option>
+                            <option value="3">Medium (3)</option>
+                            <option value="4">High (4)</option>
+                            <option value="5">Very High (5)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Emotional State</label>
+                        <select id="emotions">
+                            <option value="">Select...</option>
+                            <option value="Calm">Calm</option>
+                            <option value="Confident">Confident</option>
+                            <option value="Anxious">Anxious</option>
+                            <option value="Angry">Angry</option>
+                            <option value="FOMO">FOMO</option>
+                            <option value="Frustrated">Frustrated</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Notes / Analysis</label>
+                    <textarea id="form_notes" placeholder="Why did you take this trade? What's your analysis?" rows="3"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" id="saveJournalBtn">💾 Save Trade</button>
+                    <button type="reset" class="btn-secondary">Clear</button>
+                </div>
+                <p id="journalMessage" class="form-message"></p>
+            </form>
+        </div>
+        <div class="sidebar-right">
+            <div class="card filter-mini-card">
+                <h4>Quick Filters</h4>
+                <label>Date Range</label>
+                <input type="date" id="journal_dateStart" class="filter-input">
+                <input type="date" id="journal_dateEnd" class="filter-input">
+                <label>Strategy</label>
+                <select id="journal_strategy" class="filter-input"><option value="">All</option></select>
+                <label>Outcome</label>
+                <select id="journal_outcome" class="filter-input">
+                    <option value="">All</option>
+                    <option value="Win">Win</option>
+                    <option value="Loss">Loss</option>
+                    <option value="BE">BE</option>
+                </select>
+                <button class="btn-primary btn-small" onclick="applyJournalFilters()">Apply</button>
+                <button class="btn-secondary btn-small" onclick="clearJournalFilters()">Clear</button>
+            </div>
+            <div class="card stats-mini-card">
+                <h4>Journal Stats</h4>
+                <div class="stat-mini"><span>Entries:</span><span id="journalEntryCount">0</span></div>
+                <div class="stat-mini"><span>Latest:</span><span id="journalLatestDate">--</span></div>
+            </div>
+        </div>
+    </div>
+    <div class="card trades-table-card">
+        <h3>Trade History</h3>
+        <div class="table-responsive">
+            <table id="journalTable" class="trades-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Pair</th>
+                        <th>Direction</th>
+                        <th>Entry</th>
+                        <th>SL</th>
+                        <th>TP</th>
+                        <th>R:R</th>
+                        <th>Outcome</th>
+                        <th>P/L</th>
+                        <th>Confidence</th>
+                        <th>Emotion</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody id="tradeTableBody">
+                    <tr><td colspan="12" class="empty-state">No trades recorded yet</td></tr>
+                </tbody>
+            </table>
+        </div>
+        <p id="noTradesMessage" class="empty-message" style="display:none;">No trades yet. Start trading to see history!</p>
+    </div>
+</section>
+
+<!-- ANALYTICS SECTION -->
+<section id="analyticsSection" class="content-section">
+    <div class="section-header">
+        <h2>Advanced Analytics</h2>
+        <p class="section-subtitle">Deep dive into your trading performance and patterns.</p>
+    </div>
+    <div class="analytics-toolbar">
+        <div class="toolbar-filters">
+            <input type="date" id="analytics_dateStart" class="toolbar-input">
+            <input type="date" id="analytics_dateEnd" class="toolbar-input">
+            <select id="analytics_strategy" class="toolbar-input"><option value="">All Strategies</option></select>
+            <button class="btn-secondary" onclick="applyAnalyticsFilters()">Apply</button>
+        </div>
+        <div class="toolbar-actions">
+            <button class="btn-secondary" onclick="downloadData('csv')">📥 Download CSV</button>
+            <button class="btn-secondary" onclick="downloadData('json')">📥 Download JSON</button>
+        </div>
+    </div>
+    <div class="charts-grid">
+        <div class="card chart-card chart-half">
+            <h3>Equity Curve</h3>
+            <canvas id="equityChart" height="250"></canvas>
+        </div>
+        <div class="card chart-card chart-half">
+            <h3>Drawdown History</h3>
+            <canvas id="drawdownChart" height="250"></canvas>
+        </div>
+    </div>
+    <div class="charts-grid">
+        <div class="card chart-card chart-third">
+            <h3>Risk/Reward Distribution</h3>
+            <canvas id="rrChart" height="200"></canvas>
+        </div>
+        <div class="card chart-card chart-third">
+            <h3>P/L by Emotion</h3>
+            <canvas id="emotionChart" height="200"></canvas>
+        </div>
+        <div class="card chart-card chart-third">
+            <h3>Session Performance</h3>
+            <canvas id="sessionChart" height="200"></canvas>
+        </div>
+    </div>
+    <div class="card metrics-table-card">
+        <h3>Performance Metrics</h3>
+        <table class="metrics-table">
+            <tbody>
+                <tr>
+                    <td class="metric-label">Total Trades</td>
+                    <td class="metric-value" id="metric_totalTrades">0</td>
+                    <td class="metric-label">Winning Trades</td>
+                    <td class="metric-value" id="metric_wins">0</td>
+                </tr>
+                <tr>
+                    <td class="metric-label">Win Rate</td>
+                    <td class="metric-value" id="metric_winRate">0%</td>
+                    <td class="metric-label">Profit Factor</td>
+                    <td class="metric-value" id="metric_profitFactor">0</td>
+                </tr>
+                <tr>
+                    <td class="metric-label">Total P/L</td>
+                    <td class="metric-value metric-value-pnl" id="metric_totalPL">$0</td>
+                    <td class="metric-label">Avg R:R</td>
+                    <td class="metric-value" id="metric_avgRR">0</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="card insights-card">
+        <h3>💡 Key Insights</h3>
+        <div id="analyticsInsights" class="insights-list"></div>
+    </div>
+</section>
+
+<!-- SETTINGS SECTION -->
+<section id="settingsSection" class="content-section">
+    <div class="section-header">
+        <h2>Settings & Configuration</h2>
+        <p class="section-subtitle">Manage your trading rules, risk parameters, and preferences.</p>
+    </div>
+    <div class="settings-grid">
+        <div class="card settings-card">
+            <h3>📋 Your Trading Strategy</h3>
+            <textarea id="strategyInput" placeholder="Describe your complete trading strategy..." rows="6" class="strategy-textarea"></textarea>
+            <button class="btn-primary" id="saveStrategyBtn">Save Strategy</button>
+            <p id="strategySavedMessage" class="form-message"></p>
+        </div>
+        <div class="card settings-card">
+            <h3>⚖️ Strategy Rules</h3>
+            <p class="settings-description">Define rules for different trading strategies (e.g., min R:R, allowed sessions).</p>
+            <button class="btn-secondary" onclick="openRulesModal()">Manage Rules</button>
+        </div>
+        <div class="card settings-card">
+            <h3>🛡️ Risk Management</h3>
+            <p class="settings-description">Set your maximum risk per trade, daily loss limits, and drawdown thresholds.</p>
+            <button class="btn-secondary" onclick="openRiskModal()">Risk Settings</button>
+        </div>
+        <div class="card settings-card">
+            <h3>✅ Pre-Trade Checklist</h3>
+            <div class="setting-item">
+                <label>Min Confluence Score</label>
+                <input type="number" id="minConfluence" value="0" min="0" max="10" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Max Trades Per Day</label>
+                <input type="number" id="maxTradesPerDay" value="6" min="1" max="50" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Loss Cooldown (minutes)</label>
+                <input type="number" id="lossCooldown" value="30" min="0" max="1440" class="setting-input">
+            </div>
+            <button class="btn-primary" onclick="savePreTradeSettings()">Save Settings</button>
+        </div>
+        <div class="card settings-card">
+            <h3>💳 Account Settings</h3>
+            <div class="setting-item">
+                <label>Account Balance</label>
+                <input type="number" id="accountBalance" value="10000" min="0" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Risk % per Trade</label>
+                <input type="number" id="defaultRiskPct" value="1" min="0" max="100" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Position Size</label>
+                <input type="number" id="positionSize" value="1000" min="0" class="setting-input">
+            </div>
+            <button class="btn-primary" onclick="saveAccountSettings()">Save Settings</button>
+        </div>
+        <div class="card settings-card">
+            <h3>😊 Emotional State Check</h3>
+            <p class="settings-description">Set minimum emotional readiness before trading.</p>
+            <div class="setting-item">
+                <label>Emotional Stability (1-5)</label>
+                <input type="number" id="emotion_stability" value="4" min="1" max="5" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Confidence Level (1-5)</label>
+                <input type="number" id="emotion_confidence" value="3" min="1" max="5" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Max Impulse (1-5)</label>
+                <input type="number" id="emotion_impulse" value="1" min="1" max="5" class="setting-input">
+            </div>
+            <button class="btn-primary" onclick="saveEmotionalSettings()">Save Settings</button>
+        </div>
+        <div class="card settings-card">
+            <h3>�️ Brand & Logo</h3>
+            <p class="settings-description">Customize your app's logo and branding.</p>
+            <div class="setting-item">
+                <label>App Logo (URL or upload)</label>
+                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                    <input type="text" id="customLogoUrl" placeholder="Paste image URL..." class="setting-input" style="flex: 1;">
+                    <button class="btn-secondary btn-small" onclick="document.getElementById('logoUpload').click()">Upload</button>
+                    <input type="file" id="logoUpload" accept="image/*" style="display:none" onchange="handleLogoUpload(event)">
+                </div>
+            </div>
+            <div class="setting-item">
+                <label>App Title</label>
+                <input type="text" id="customAppTitle" placeholder="e.g., MyTradingApp" class="setting-input" value="ForexBuddy">
+            </div>
+            <button class="btn-primary" onclick="saveLogoSettings()">Save Branding</button>
+        </div>
+        <div class="card settings-card">
+            <h3>📸 Prompt Images</h3>
+            <p class="settings-description">Upload images for specific prompts using the dropdown menu.</p>
+            
+            <div class="setting-item">
+                <label>Prompt Type</label>
+                <select id="promptTypeSelect">
+                    <option value="">Select a prompt type...</option>
+                    <option value="strategy">📋 Strategy Alignment</option>
+                    <option value="criteria">📋 Trading Criteria</option>
+                    <option value="devil">🚫 Devil's Traps</option>
+                    <option value="bullishStructure">📈 Identified bullish or bearish HTF structure</option>
+                    <option value="bearishStructure">📈 Identified bullish or bearish HTF structure</option>
+                    <option value="liquidity">💧 Identified liquidity roadmap</option>
+                    <option value="dol">📅 Identified DOL</option>
+                    <option value="pdArray">📊 Identified PD array</option>
+                    <option value="ltfChoice">⏱️ Identified LTF CHOCH</option>
+                    <option value="opposingLiquidity">⚔️ Identified opposing liquidity on HTF</option>
+                    <option value="failureStructure">💥 failure structure in orderflow</option>
+                    <option value="predeterminedLiquidity">🎯 predetermined liquidity and PD array not taken</option>
+                    <option value="mitigatedPD">🛡️ PD array already mitigated</option>
+                    <option value="dolMitigated">📅 DOL mitigated</option>
+                </select>
+            </div>
+            
+            <div class="setting-item">
+                <label>Upload Image</label>
+                <button class="btn-secondary btn-small" onclick="document.getElementById('promptImageUpload').click()">Choose Image</button>
+                <input type="file" id="promptImageUpload" accept="image/*" style="display:none">
+                <span id="promptImageFileName" style="font-size: 12px; color: #94a3b8; display: block; margin-top: 4px;"></span>
+            </div>
+            
+            <button class="btn-primary" onclick="savePromptImageForType()">Save Image for Prompt</button>
+            
+            <div id="promptImagesList" style="max-height: 200px; overflow-y: auto; margin-top: 12px; border: 1px solid #334155; border-radius: 6px; padding: 8px;">
+                <!-- Current prompt images will be listed here -->
+            </div>
+        </div>
+        <div class="card settings-card">
+            <h3>✅ Trading Criteria</h3>
+            <p class="settings-description">Manage your trading criteria checklist.</p>
+            <div id="criteriaList" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #334155; border-radius: 6px; padding: 8px;">
+                <!-- Criteria items will be listed here -->
+            </div>
+            <div class="setting-item">
+                <label>Add New Criteria</label>
+                <input type="text" id="newCriteria" placeholder="e.g., HTF Alignment, Volume Spike" class="setting-input">
+            </div>
+            <button class="btn-primary" onclick="addCriteria()">+ Add Criteria</button>
+        </div>
+        <div class="card settings-card">
+            <h3>👿 Devils Lie Settings</h3>
+            <p class="settings-description">Configure market traps and false signals to avoid.</p>
+            <div id="devilsLieList" style="max-height: 250px; overflow-y: auto; margin-bottom: 12px; border: 1px solid #334155; border-radius: 6px; padding: 8px;">
+                <!-- Devils lie items will be listed here -->
+            </div>
+            <div class="setting-item">
+                <label>Add Devils Lie Pattern</label>
+                <input type="text" id="newDevilsLie" placeholder="e.g., False Breakout Above Resistance" class="setting-input">
+            </div>
+            <div class="setting-item">
+                <label>Risk Level (Low/Medium/High)</label>
+                <select id="devilsLieRisk" class="setting-input">
+                    <option value="Low">Low Risk</option>
+                    <option value="Medium" selected>Medium Risk</option>
+                    <option value="High">High Risk</option>
+                </select>
+            </div>
+            <button class="btn-primary" onclick="addDevilsLie()">+ Add Pattern</button>
+        </div>
+        <div class="card settings-card">
+            <h3>�💾 Data Management</h3>
+            <p class="settings-description">Backup, restore, and manage your trading data.</p>
+            <div class="data-actions">
+                <button class="btn-secondary" onclick="downloadData('csv')">📥 Export as CSV</button>
+                <button class="btn-secondary" onclick="downloadData('json')">📥 Export as JSON</button>
+                <button class="btn-secondary" onclick="document.getElementById('importCsv').click()">📤 Import CSV</button>
+                <input type="file" id="importCsv" accept=".csv" style="display:none" onchange="importCSVFile(event)">
+                <button class="btn-secondary" onclick="document.getElementById('importJson').click()">📤 Import JSON</button>
+                <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSONFile(event)">
+                <button class="btn-danger" onclick="if(confirm('Clear all trades? This cannot be undone!')) { clearAllTrades(); }">🗑️ Clear All Trades</button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- STRATEGY PROMPTS -->
+<section id="promptSection" class="content-section hidden">
+    <div class="prompt-container">
+        <div class="prompt-card">
+            <img id="promptImage" src="" alt="Prompt Image" class="prompt-image">
+            <h2 id="promptText" class="prompt-text"></h2>
+            
+            <!-- Slider Input -->
+            <div id="sliderContainer" class="prompt-slider-container">
+                <label for="promptSlider" class="slider-label">Agreement Level:</label>
+                <input type="range" id="promptSlider" class="prompt-slider" min="0" max="100" value="50" step="5">
+                <div class="slider-value">
+                    <span id="sliderValue">50%</span>
+                    <div class="slider-labels">
+                        <span>Strongly Disagree</span>
+                        <span>Neutral</span>
+                        <span>Strongly Agree</span>
+                    </div>
+                </div>
+                <button class="btn-primary btn-large" id="submitSliderBtn" onclick="submitSliderAnswer()">Submit Answer</button>
+            </div>
+            
+            <!-- Number Input -->
+            <div id="numberContainer" class="prompt-input-container" style="display: none;">
+                <label for="promptNumber" class="input-label">Enter Value:</label>
+                <input type="number" id="promptNumber" class="prompt-input" step="0.1">
+                <button class="btn-primary btn-large" id="submitNumberBtn" onclick="submitNumberAnswer()">Submit Answer</button>
+            </div>
+            
+            <!-- Text Input -->
+            <div id="textContainer" class="prompt-input-container" style="display: none;">
+                <label for="promptText" class="input-label">Enter Answer:</label>
+                <input type="text" id="promptTextInput" class="prompt-input" placeholder="Type your answer...">
+                <button class="btn-primary btn-large" id="submitTextBtn" onclick="submitTextAnswer()">Submit Answer</button>
+            </div>
+            
+            <!-- Letters Input -->
+            <div id="lettersContainer" class="prompt-input-container" style="display: none;">
+                <label for="promptLetters" class="input-label">Enter Grade:</label>
+                <div class="grade-buttons">
+                    <button class="btn-grade" onclick="submitGradeAnswer('A')">A</button>
+                    <button class="btn-grade" onclick="submitGradeAnswer('B')">B</button>
+                    <button class="btn-grade" onclick="submitGradeAnswer('C')">C</button>
+                    <button class="btn-grade" onclick="submitGradeAnswer('D')">D</button>
+                    <button class="btn-grade" onclick="submitGradeAnswer('F')">F</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- INVALID TRADE JOURNAL -->
+<section id="invalidJournalSection" class="content-section hidden">
+    <div class="section-header">
+        <h2>🚫 Invalid Trade Journal</h2>
+        <p class="section-subtitle">Record rejected trades for analysis and improvement.</p>
+    </div>
+    <div class="journal-grid">
+        <div class="card form-card">
+            <h3>📝 Rejected Trade Entry</h3>
+            <form id="invalidTradeForm" class="trade-form">
+                <div class="form-group">
+                    <label>Currency Pair</label>
+                    <input type="text" id="invalidPair" placeholder="e.g., EURUSD" required>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Direction</label>
+                        <select id="invalidDirection" required>
+                            <option value="">Select...</option>
+                            <option value="Buy">Buy</option>
+                            <option value="Sell">Sell</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Strategy</label>
+                        <select id="invalidStrategy">
+                            <option value="">Select...</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Entry Price</label>
+                        <input type="number" id="invalidEntry" placeholder="1.0500" step="0.0001" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Stop Loss</label>
+                        <input type="number" id="invalidStopLoss" placeholder="1.0400" step="0.0001" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Take Profit</label>
+                        <input type="number" id="invalidTakeProfit" placeholder="1.0600" step="0.0001" required>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Rejection Reason</label>
+                    <textarea id="invalidRejectionReason" rows="3" readonly></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Notes / Analysis</label>
+                    <textarea id="invalidNotes" placeholder="Why was this trade rejected? What did you learn?" rows="3"></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary" id="saveInvalidJournalBtn">💾 Save Rejected Trade</button>
+                    <button type="reset" class="btn-secondary">Clear</button>
+                </div>
+                <p id="invalidJournalMessage" class="form-message"></p>
+            </form>
+        </div>
+        <div class="sidebar-right">
+            <div class="card filter-mini-card">
+                <h4>Recent Rejections</h4>
+                <div id="recentInvalidTrades" class="recent-trades-list">
+                    <p class="text-muted">No rejected trades yet</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- DECISION SCREEN -->
+<section id="decisionSection" class="content-section hidden">
+    <div class="decision-container">
+        <div class="decision-card">
+            <h2 id="finalDecision" class="decision-text"></h2>
+            <div id="detailedReasoning" class="detailed-reasoning"></div>
+            <button class="btn-primary btn-large" id="continueBtn" onclick="continueAfterDecision()">Continue →</button>
+        </div>
+    </div>
+</section>
+
+</main>
+
+<!-- MODALS -->
+<div id="rulesModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Strategy Rules Manager</h3>
+            <button class="modal-close" onclick="closeRulesModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Strategy Name</label>
+                <input id="rule_strategyName" type="text" placeholder="e.g., RSI Breakout" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Minimum R:R</label>
+                <input id="rule_minRR" type="number" placeholder="2.0" step="0.1" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Allowed Sessions (comma separated)</label>
+                <input id="rule_allowedSessions" type="text" placeholder="London, NY, Asia" class="form-input">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="saveRuleFromModal()">Save Rule</button>
+                <button class="btn-secondary" onclick="closeRulesModal()">Cancel</button>
+            </div>
+            <div id="rulesList" class="rules-list"></div>
+        </div>
     </div>
 </div>
 
+<div id="riskModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Risk Management Settings</h3>
+            <button class="modal-close" onclick="closeRiskModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Max Risk % per Trade</label>
+                <input id="risk_maxRiskPerTrade" type="number" placeholder="1" step="0.1" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Max Daily Loss</label>
+                <input id="risk_maxDailyLoss" type="number" placeholder="500" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Max Drawdown %</label>
+                <input id="risk_maxDrawdown" type="number" placeholder="10" step="0.1" class="form-input">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="saveRiskModal()">Save</button>
+                <button class="btn-secondary" onclick="closeRiskModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="editModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>Edit Trade</h3>
+            <button class="modal-close" onclick="closeEditModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-group">
+                <label>Pair</label>
+                <input id="edit_pair" type="text" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Entry Price</label>
+                <input id="edit_entry" type="number" step="0.0001" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Stop Loss</label>
+                <input id="edit_stop" type="number" step="0.0001" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Take Profit</label>
+                <input id="edit_tp" type="number" step="0.0001" class="form-input">
+            </div>
+            <div class="form-group">
+                <label>Notes</label>
+                <textarea id="edit_notes" rows="3" class="form-input"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Result</label>
+                <select id="edit_result" class="form-input">
+                    <option value="">(unset)</option>
+                    <option value="Win">Win</option>
+                    <option value="Loss">Loss</option>
+                    <option value="BE">Break-Even</option>
+                </select>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="saveEditModal()">Save</button>
+                <button class="btn-secondary" onclick="closeEditModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="reflectionModal" class="modal-overlay">
+    <div class="modal">
+        <div class="modal-header">
+            <h3>⚠️ Reflection Required</h3>
+            <button class="modal-close" onclick="closeReflectionModal()">✕</button>
+        </div>
+        <div class="modal-body">
+            <p id="reflectionReason" class="reflection-reason"></p>
+            <div class="form-group">
+                <label>Why did you want to take this trade?</label>
+                <textarea id="reflectionWhy" rows="3" class="form-input"></textarea>
+            </div>
+            <div class="form-group">
+                <label>Which rule was broken?</label>
+                <input id="reflectionRule" type="text" class="form-input">
+            </div>
+            <div class="modal-actions">
+                <button class="btn-primary" onclick="submitReflection()">Save Reflection</button>
+                <button class="btn-secondary" onclick="closeReflectionModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- FLOATING ACTION BUTTON -->
+<button class="fab" id="fab" onclick="quickStartTrade()" title="Quick Start Trade">➕</button>
+
+<!-- SCRIPTS -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="script.js"></script>
+<script src="phase5-nav.js"></script>
 </body>
 </html>
