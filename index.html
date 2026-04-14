@@ -2,9 +2,13 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#1e293b">
+    <meta name="format-detection" content="telephone=no">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
     <title>Forex Trading Buddy — Professional Trading Dashboard</title>
     <link rel="stylesheet" href="style.css">
     <style>
@@ -14,38 +18,67 @@
             .sidebar:not(.collapsed) { transform: translateX(0); }
             .main-content { margin-left: 0; }
             .navbar-center { display: none; }
-            .mobile-menu-btn { display: block !important; background: #22c55e; border: none; color: white; padding: 8px; border-radius: 4px; cursor: pointer; }
+            .mobile-menu-btn { 
+                display: block !important; 
+                background: #22c55e; 
+                border: none; 
+                color: white; 
+                padding: 12px; 
+                border-radius: 4px; 
+                cursor: pointer;
+                min-height: 48px;
+                min-width: 48px;
+            }
             .cards-grid { grid-template-columns: 1fr !important; }
             .navbar-right { gap: 8px; }
             .nav-stat { font-size: 12px; }
+        }
+        
+        /* Android-safe viewport units */
+        .prompt-container {
+            min-height: 80dvh;
+            min-height: 80svh;
+        }
+        
+        /* Android keyboard handling */
+        .main-content {
+            height: 100vh;
+            height: 100dvh;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        
+        /* Android compositing */
+        .sidebar {
+            transform: translateZ(0);
+            will-change: transform;
         }
     </style>
 </head>
 <body>
 
-<!-- NAVBAR -->
-<nav class="navbar">
+<nav class="navbar" role="navigation" aria-label="Main navigation">
     <div class="navbar-left">
-        <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()">☰</button>
+        <button class="sidebar-toggle" id="sidebarToggle" onclick="toggleSidebar()" aria-label="Toggle sidebar" aria-expanded="false">☰</button>
         <div class="navbar-branding">
-            <img id="navbarLogo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2322c55e'/%3E%3Ctext x='50' y='60' font-size='60' text-anchor='middle' fill='%23000' font-weight='bold'%3EFB%3C/text%3E%3C/svg%3E" alt="Logo" class="navbar-logo-img" title="Click to customize logo">
+            <img id="navbarLogo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='45' fill='%2322c55e'/%3E%3Ctext x='50' y='60' font-size='60' text-anchor='middle' fill='%23000' font-weight='bold'%3EFB%3C/text%3E%3C/svg%3E" alt="ForexBuddy Logo" class="navbar-logo-img" title="Click to customize logo">
             <span class="navbar-title">ForexBuddy</span>
         </div>
     </div>
     <div class="navbar-center">
-        <button class="nav-btn active" onclick="navigateTo('home')">Home</button>
-        <button class="nav-btn" onclick="navigateTo('journal')">Journal</button>
-        <button class="nav-btn" onclick="navigateTo('analytics')">Analytics</button>
-        <button class="nav-btn" onclick="navigateTo('settings')">Settings</button>
+        <button class="nav-btn active" onclick="navigateTo('home')" aria-label="Home" aria-current="page">Home</button>
+        <button class="nav-btn" onclick="navigateTo('journal')" aria-label="Trading Journal">Journal</button>
+        <button class="nav-btn" onclick="navigateTo('analytics')" aria-label="Analytics">Analytics</button>
+        <button class="nav-btn" onclick="navigateTo('settings')" aria-label="Settings">Settings</button>
     </div>
     <div class="navbar-right">
         <!-- Mobile menu button -->
-        <button class="mobile-menu-btn" onclick="toggleMobileMenu()" style="display:none;">☰</button>
+        <button class="mobile-menu-btn" onclick="toggleMobileMenu()" style="display:none;" aria-label="Mobile menu">☰</button>
         <div class="nav-stat"><span class="nav-stat-label">Trades</span><span class="nav-stat-value" id="navTrades">0</span></div>
         <div class="nav-stat"><span class="nav-stat-label">Win%</span><span class="nav-stat-value" id="navWinRate">0%</span></div>
         <div class="nav-stat"><span class="nav-stat-label">PnL</span><span class="nav-stat-value" id="navPnL">0</span></div>
         <div class="nav-stat"><span class="nav-stat-label">Score</span><span class="nav-stat-value" id="navScore">--</span></div>
-        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌙</button>
+        <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme" aria-label="Toggle dark/light theme">🌙</button>
     </div>
 </nav>
 
@@ -194,133 +227,107 @@
 <section id="journalSection" class="content-section">
     <div class="section-header">
         <h2>Trading Journal</h2>
-        <p class="section-subtitle">Record and manage your trading activity.</p>
+        <p class="section-subtitle">Approved trades only - tracks trades that passed your criteria validation.</p>
     </div>
-    <div class="journal-grid">
-        <div class="card form-card">
-            <h3>📝 New Trade Entry</h3>
-            <form id="tradeForm" class="trade-form">
-                <div class="form-group">
-                    <label>Currency Pair</label>
-                    <input type="text" id="pair" placeholder="e.g., EURUSD" required>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Direction</label>
-                        <select id="idea_direction" required>
-                            <option value="">Select...</option>
-                            <option value="Buy">Buy</option>
-                            <option value="Sell">Sell</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Strategy</label>
-                        <select id="form_strategy">
-                            <option value="">Select...</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Entry Price</label>
-                        <input type="number" id="entry" placeholder="1.0500" step="0.0001" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Stop Loss</label>
-                        <input type="number" id="stopLoss" placeholder="1.0400" step="0.0001" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Take Profit</label>
-                        <input type="number" id="takeProfit" placeholder="1.0600" step="0.0001" required>
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group">
-                        <label>Confidence Level</label>
-                        <select id="confidence" required>
-                            <option value="">Select...</option>
-                            <option value="1">Very Low (1)</option>
-                            <option value="2">Low (2)</option>
-                            <option value="3">Medium (3)</option>
-                            <option value="4">High (4)</option>
-                            <option value="5">Very High (5)</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>Emotional State</label>
-                        <select id="emotions">
-                            <option value="">Select...</option>
-                            <option value="Calm">Calm</option>
-                            <option value="Confident">Confident</option>
-                            <option value="Anxious">Anxious</option>
-                            <option value="Angry">Angry</option>
-                            <option value="FOMO">FOMO</option>
-                            <option value="Frustrated">Frustrated</option>
-                        </select>
-                    </div>
-                </div>
-                <div class="form-group">
-                    <label>Notes / Analysis</label>
-                    <textarea id="form_notes" placeholder="Why did you take this trade? What's your analysis?" rows="3"></textarea>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn-primary" id="saveJournalBtn">💾 Save Trade</button>
-                    <button type="reset" class="btn-secondary">Clear</button>
-                </div>
-                <p id="journalMessage" class="form-message"></p>
-            </form>
+    
+    <!-- Live Trades Section -->
+    <div class="card live-trades-card">
+        <h3>🔴 Live Trades</h3>
+        <div id="liveTradesContainer" class="live-trades-grid">
+            <div class="empty-state">No live trades currently</div>
         </div>
-        <div class="sidebar-right">
-            <div class="card filter-mini-card">
-                <h4>Quick Filters</h4>
-                <label>Date Range</label>
-                <input type="date" id="journal_dateStart" class="filter-input">
-                <input type="date" id="journal_dateEnd" class="filter-input">
-                <label>Strategy</label>
-                <select id="journal_strategy" class="filter-input"><option value="">All</option></select>
-                <label>Outcome</label>
-                <select id="journal_outcome" class="filter-input">
-                    <option value="">All</option>
-                    <option value="Win">Win</option>
-                    <option value="Loss">Loss</option>
-                    <option value="BE">BE</option>
-                </select>
-                <button class="btn-primary btn-small" onclick="applyJournalFilters()">Apply</button>
-                <button class="btn-secondary btn-small" onclick="clearJournalFilters()">Clear</button>
+    </div>
+    
+    <!-- Unapproved Trades Section -->
+    <div class="card unapproved-trades-card">
+        <h3>❌ Unapproved Trades</h3>
+        <div class="trades-filter-toolbar">
+            <select id="unapprovedFilter" class="filter-select">
+                <option value="all">All Unapproved</option>
+                <option value="recent">Most Recent</option>
+                <option value="criteria">Failed Criteria</option>
+                <option value="devils">Devil's Traps</option>
+            </select>
+            <button class="btn-secondary btn-small" onclick="clearUnapprovedTrades()">Clear All</button>
+        </div>
+        <div id="unapprovedTradesContainer" class="unapproved-trades-grid">
+            <div class="empty-state">No unapproved trades yet</div>
+        </div>
+    </div>
+    
+    <!-- Completed Trades Section -->
+    <div class="card completed-trades-card">
+        <h3>✅ Completed Trades</h3>
+        <div class="trades-filter-toolbar">
+            <select id="completedFilter" class="filter-select">
+                <option value="all">All Completed</option>
+                <option value="win">Wins Only</option>
+                <option value="loss">Losses Only</option>
+                <option value="be">Breakeven Only</option>
+            </select>
+            <button class="btn-secondary btn-small" onclick="clearCompletedTrades()">Clear All</button>
+        </div>
+        <div id="completedTradesContainer" class="completed-trades-grid">
+            <div class="empty-state">No completed trades yet</div>
+        </div>
+    </div>
+    
+    <!-- Trade Completion Modal -->
+    <div id="tradeCompletionModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Complete Trade</h3>
+                <button class="modal-close" onclick="closeTradeCompletionModal()">✕</button>
             </div>
-            <div class="card stats-mini-card">
-                <h4>Journal Stats</h4>
-                <div class="stat-mini"><span>Entries:</span><span id="journalEntryCount">0</span></div>
-                <div class="stat-mini"><span>Latest:</span><span id="journalLatestDate">--</span></div>
+            <div class="modal-body">
+                <div class="trade-completion-form">
+                    <div class="form-group">
+                        <label>Trade Outcome</label>
+                        <select id="completionOutcome" class="form-input">
+                            <option value="">Select outcome...</option>
+                            <option value="TP">Take Profit (TP)</option>
+                            <option value="SL">Stop Loss (SL)</option>
+                            <option value="BE">Breakeven (BE)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Exit Price</label>
+                        <input type="number" id="exitPrice" class="form-input" placeholder="Exit price" step="0.0001">
+                    </div>
+                    <div class="form-group">
+                        <label>After Picture</label>
+                        <input type="file" id="afterPicture" accept="image/*" class="form-input">
+                        <div id="afterPicturePreview" class="image-preview"></div>
+                    </div>
+                    <div class="form-group">
+                        <label>Thoughts & Lessons Learned</label>
+                        <textarea id="completionNotes" class="form-input" placeholder="What happened during trade completion? What did you learn from this trade?" rows="4"></textarea>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="completeTrade()">Complete Trade</button>
+                <button class="btn-secondary" onclick="closeTradeCompletionModal()">Cancel</button>
             </div>
         </div>
     </div>
-    <div class="card trades-table-card">
-        <h3>Trade History</h3>
-        <div class="table-responsive">
-            <table id="journalTable" class="trades-table">
-                <thead>
-                    <tr>
-                        <th>Date</th>
-                        <th>Pair</th>
-                        <th>Direction</th>
-                        <th>Entry</th>
-                        <th>SL</th>
-                        <th>TP</th>
-                        <th>R:R</th>
-                        <th>Outcome</th>
-                        <th>P/L</th>
-                        <th>Confidence</th>
-                        <th>Emotion</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="tradeTableBody">
-                    <tr><td colspan="12" class="empty-state">No trades recorded yet</td></tr>
-                </tbody>
-            </table>
+    
+    <!-- Trade Details Modal -->
+    <div id="tradeDetailsModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Trade Details</h3>
+                <button class="modal-close" onclick="closeTradeDetailsModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div id="tradeDetailsContent">
+                    <!-- Trade details will be populated here -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-primary" onclick="closeTradeDetailsModal()">Close</button>
+            </div>
         </div>
-        <p id="noTradesMessage" class="empty-message" style="display:none;">No trades yet. Start trading to see history!</p>
     </div>
 </section>
 
@@ -390,6 +397,90 @@
                 </tr>
             </tbody>
         </table>
+    </div>
+    <div class="card metrics-table-card">
+        <h3>Advanced Metrics</h3>
+        <div class="advanced-metrics-grid">
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Expectancy (avg P/L per trade)</div>
+                <div class="advanced-metric-value" id="adv_expectancy">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Payoff Ratio (avg win / avg loss)</div>
+                <div class="advanced-metric-value" id="adv_payoff">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Avg Win</div>
+                <div class="advanced-metric-value" id="adv_avgWin">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Avg Loss</div>
+                <div class="advanced-metric-value" id="adv_avgLoss">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Best Win Streak</div>
+                <div class="advanced-metric-value" id="adv_bestWinStreak">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Worst Loss Streak</div>
+                <div class="advanced-metric-value" id="adv_worstLossStreak">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Max Drawdown</div>
+                <div class="advanced-metric-value" id="adv_maxDrawdown">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Recovery Factor (net / |max DD|)</div>
+                <div class="advanced-metric-value" id="adv_recovery">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">SQN (System Quality Number)</div>
+                <div class="advanced-metric-value" id="adv_sqn">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Tilt Risk (post-loss performance)</div>
+                <div class="advanced-metric-value" id="adv_tiltRisk">--</div>
+            </div>
+        </div>
+    </div>
+    <div class="card metrics-table-card">
+        <h3>Condition Explorer</h3>
+        <div class="condition-rules" id="conditionRules"></div>
+        <div class="condition-rules-toolbar">
+            <button class="btn-secondary btn-small" onclick="addConditionRule()">Add Rule</button>
+            <button class="btn-secondary btn-small" onclick="clearConditionRules()">Clear Rules</button>
+        </div>
+        <div class="condition-summary" id="conditionSummary"></div>
+        <div class="condition-toolbar">
+            <select id="condition_dimension" class="toolbar-input" multiple size="3">
+                <option value="emotion">Emotion</option>
+                <option value="session">Session</option>
+                <option value="weekday">Day of Week</option>
+                <option value="hour">Hour (0-23)</option>
+                <option value="confidence">Confidence Bucket</option>
+                <option value="rr">R:R Bucket</option>
+                <option value="pair">Pair</option>
+                <option value="direction">Direction</option>
+            </select>
+            <div class="condition-hint">Select multiple to create compound conditions</div>
+            <button class="btn-secondary btn-small" onclick="refreshConditionExplorer()">Refresh</button>
+        </div>
+        <div class="condition-table-wrap">
+            <table class="metrics-table condition-table">
+                <thead>
+                    <tr>
+                        <th>Condition</th>
+                        <th>Trades</th>
+                        <th>Win%</th>
+                        <th>Total P/L</th>
+                        <th>Avg P/L</th>
+                        <th>Profit Factor</th>
+                        <th>Avg R:R</th>
+                    </tr>
+                </thead>
+                <tbody id="conditionTableBody"></tbody>
+            </table>
+        </div>
     </div>
     <div class="card insights-card">
         <h3>💡 Key Insights</h3>
@@ -470,7 +561,7 @@
             <button class="btn-primary" onclick="saveEmotionalSettings()">Save Settings</button>
         </div>
         <div class="card settings-card">
-            <h3>�️ Brand & Logo</h3>
+            <h3>🎨 Brand & Logo</h3>
             <p class="settings-description">Customize your app's logo and branding.</p>
             <div class="setting-item">
                 <label>App Logo (URL or upload)</label>
@@ -497,17 +588,6 @@
                     <option value="strategy">📋 Strategy Alignment</option>
                     <option value="criteria">📋 Trading Criteria</option>
                     <option value="devil">🚫 Devil's Traps</option>
-                    <option value="bullishStructure">📈 Identified bullish or bearish HTF structure</option>
-                    <option value="bearishStructure">📈 Identified bullish or bearish HTF structure</option>
-                    <option value="liquidity">💧 Identified liquidity roadmap</option>
-                    <option value="dol">📅 Identified DOL</option>
-                    <option value="pdArray">📊 Identified PD array</option>
-                    <option value="ltfChoice">⏱️ Identified LTF CHOCH</option>
-                    <option value="opposingLiquidity">⚔️ Identified opposing liquidity on HTF</option>
-                    <option value="failureStructure">💥 failure structure in orderflow</option>
-                    <option value="predeterminedLiquidity">🎯 predetermined liquidity and PD array not taken</option>
-                    <option value="mitigatedPD">🛡️ PD array already mitigated</option>
-                    <option value="dolMitigated">📅 DOL mitigated</option>
                 </select>
             </div>
             
@@ -555,6 +635,7 @@
                 </select>
             </div>
             <button class="btn-primary" onclick="addDevilsLie()">+ Add Pattern</button>
+            <button class="btn-secondary" onclick="initializeUserDevilsLies()" style="margin-left: 8px;">🔄 Initialize Default Patterns</button>
         </div>
         <div class="card settings-card">
             <h3>�💾 Data Management</h3>
@@ -689,6 +770,157 @@
                     <p class="text-muted">No rejected trades yet</p>
                 </div>
             </div>
+        </div>
+    </div>
+</section>
+
+<!-- APPROVED TRADE INPUT SECTION -->
+<section id="approvedTradeInputSection" class="content-section hidden">
+    <div class="trade-input-container">
+        <div class="card">
+            <h3>✅ Enter Approved Trade Details</h3>
+            <p class="text-muted">Your trade has been approved! Please complete the trade details below.</p>
+            
+            <form id="approvedTradeForm" class="trade-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="approvedPair">Currency Pair *</label>
+                        <input type="text" id="approvedPair" name="pair" required placeholder="e.g., EUR/USD">
+                    </div>
+                    <div class="form-group">
+                        <label for="approvedDirection">Direction *</label>
+                        <select id="approvedDirection" name="direction" required>
+                            <option value="">Select Direction</option>
+                            <option value="BUY">BUY (LONG)</option>
+                            <option value="SELL">SELL (SHORT)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="approvedEntry">Entry Price *</label>
+                        <input type="number" id="approvedEntry" name="entry" step="0.00001" required placeholder="e.g., 1.08500">
+                    </div>
+                    <div class="form-group">
+                        <label for="approvedStopLoss">Stop Loss *</label>
+                        <input type="number" id="approvedStopLoss" name="stopLoss" step="0.00001" required placeholder="e.g., 1.08000">
+                    </div>
+                    <div class="form-group">
+                        <label for="approvedTakeProfit">Take Profit *</label>
+                        <input type="number" id="approvedTakeProfit" name="takeProfit" step="0.00001" required placeholder="e.g., 1.09000">
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="approvedLotSize">Lot Size *</label>
+                        <input type="number" id="approvedLotSize" name="lotSize" step="0.01" required placeholder="e.g., 0.10">
+                    </div>
+                    <div class="form-group">
+                        <label for="approvedConfidence">Confidence Level (1-10) *</label>
+                        <input type="number" id="approvedConfidence" name="confidence" min="1" max="10" required placeholder="7">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="approvedEmotion">Trading Emotion *</label>
+                    <select id="approvedEmotion" name="emotion" required>
+                        <option value="">Select Emotion</option>
+                        <option value="NEUTRAL">NEUTRAL</option>
+                        <option value="CONFIDENT">CONFIDENT</option>
+                        <option value="CAUTIOUS">CAUTIOUS</option>
+                        <option value="ANXIOUS">ANXIOUS</option>
+                        <option value="GREEDY">GREEDY</option>
+                        <option value="PATIENT">PATIENT</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label for="approvedBeforePicture">Before Trade Picture *</label>
+                    <input type="file" id="approvedBeforePicture" accept="image/*" required>
+                    <div id="approvedBeforePicturePreview" class="image-preview"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="approvedNotes">Trade Notes</label>
+                    <textarea id="approvedNotes" name="notes" rows="3" placeholder="Additional notes about this trade..."></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary btn-large">💾 Save Approved Trade</button>
+                    <button type="button" class="btn-secondary" onclick="cancelApprovedTrade()">Cancel</button>
+                </div>
+                <p id="approvedTradeMessage" class="form-message"></p>
+            </form>
+        </div>
+    </div>
+</section>
+
+<!-- REJECTED TRADE INPUT SECTION -->
+<section id="rejectedTradeInputSection" class="content-section hidden">
+    <div class="trade-input-container">
+        <div class="card">
+            <h3>❌ Enter Rejected Trade Details</h3>
+            <p class="text-muted">Your trade was rejected. Please document it for analysis and improvement.</p>
+            
+            <form id="rejectedTradeForm" class="trade-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="rejectedPair">Currency Pair *</label>
+                        <input type="text" id="rejectedPair" name="pair" required placeholder="e.g., EUR/USD">
+                    </div>
+                    <div class="form-group">
+                        <label for="rejectedDirection">Direction *</label>
+                        <select id="rejectedDirection" name="direction" required>
+                            <option value="">Select Direction</option>
+                            <option value="BUY">BUY (LONG)</option>
+                            <option value="SELL">SELL (SHORT)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="rejectedEntry">Entry Price *</label>
+                        <input type="number" id="rejectedEntry" name="entry" step="0.00001" required placeholder="e.g., 1.08500">
+                    </div>
+                    <div class="form-group">
+                        <label for="rejectedStopLoss">Stop Loss *</label>
+                        <input type="number" id="rejectedStopLoss" name="stopLoss" step="0.00001" required placeholder="e.g., 1.08000">
+                    </div>
+                    <div class="form-group">
+                        <label for="rejectedTakeProfit">Take Profit *</label>
+                        <input type="number" id="rejectedTakeProfit" name="takeProfit" step="0.00001" required placeholder="e.g., 1.09000">
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="rejectedRejectionReason">Rejection Reason *</label>
+                    <textarea id="rejectedRejectionReason" name="rejectionReason" rows="2" required placeholder="Why was this trade rejected?"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="rejectedBeforePicture">Before Trade Picture *</label>
+                    <input type="file"
+                    
+                    
+                    
+                     id="rejectedBeforePicture" accept="image/*" required>
+                    <div id="rejectedBeforePicturePreview" class="image-preview"></div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="rejectedNotes">Analysis Notes</label>
+                    <textarea id="rejectedNotes" name="notes" rows="3" placeholder="What did you learn from this rejection?"></textarea>
+                </div>
+                
+                <div class="form-actions">
+                    <button type="submit" class="btn-primary btn-large">💾 Save Rejected Trade</button>
+                    <button type="button" class="btn-secondary" onclick="cancelRejectedTrade()">Cancel</button>
+                </div>
+                <p id="rejectedTradeMessage" class="form-message"></p>
+            </form>
         </div>
     </div>
 </section>
@@ -834,8 +1066,6 @@
 <button class="fab" id="fab" onclick="quickStartTrade()" title="Quick Start Trade">➕</button>
 
 <!-- SCRIPTS -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="script.js"></script>
-<script src="phase5-nav.js"></script>
 </body>
 </html>
