@@ -1,4 +1,935 @@
-// -------------------- Missing Button Functions --------------------
+// -------------------- Android Compatibility Fixes --------------------
+// Detect Android WebView
+const isAndroidWebView = () => {
+    return navigator.userAgent.includes('wv') || 
+           navigator.userAgent.includes('WebView') ||
+           window.hasOwnProperty('_cordova');
+};
+
+function persistTradeImage(tradeId, kind, dataUrl) {
+    if (!dataUrl) return null;
+    const storageKey = `tradeImage:${tradeId}:${kind}`;
+    try {
+        localStorage.setItem(storageKey, dataUrl);
+        return storageKey;
+    } catch (e) {
+        console.error('Failed to persist trade image:', storageKey, e);
+        return null;
+    }
+}
+
+function getApprovedTradesAllStatuses() {
+    try {
+        const approved = JSON.parse(safeLocalStorage.getItem('approvedTrades') || '[]');
+        return Array.isArray(approved) ? approved : [];
+    } catch (e) {
+        console.error('Error loading approvedTrades:', e);
+        return [];
+    }
+}
+
+function getApprovedCompletedTrades() {
+    const all = getApprovedTradesAllStatuses();
+    return Array.isArray(all) ? all.filter(t => t && t.status === 'completed') : [];
+}
+
+function getTradeDate(trade) {
+    return trade?.date || trade?.completionTime || trade?.approvalTime || trade?.entryTime || null;
+}
+
+function getTradePL(trade) {
+    // Option A: rely on realized P/L when available.
+    // Fallbacks exist only to avoid NaNs if legacy data is present.
+    if (!trade) return 0;
+    if (trade.pl !== null && trade.pl !== undefined && !Number.isNaN(Number(trade.pl))) {
+        return Number(trade.pl);
+    }
+    // Legacy fallback: if exitPrice exists, derive P/L from direction.
+    const entry = Number(trade.entry);
+    const exit = Number(trade.exitPrice);
+    if (Number.isFinite(entry) && Number.isFinite(exit) && trade.direction) {
+        const dir = String(trade.direction).toUpperCase();
+        if (dir === 'BUY') return exit - entry;
+        if (dir === 'SELL') return entry - exit;
+    }
+    return 0;
+}
+
+function resolveTradeImage(trade, kind) {
+    try {
+        if (!trade) return null;
+        if (kind === 'before') {
+            if (trade.beforePicture) return trade.beforePicture;
+            if (trade.beforePictureKey) return localStorage.getItem(trade.beforePictureKey);
+        }
+        if (kind === 'after') {
+            if (trade.afterPicture) return trade.afterPicture;
+            if (trade.afterPictureKey) return localStorage.getItem(trade.afterPictureKey);
+        }
+        return null;
+    } catch (e) {
+        console.error('Failed to resolve trade image:', kind, e);
+        return null;
+    }
+}
+
+function stripApprovedTradeImages(trades) {
+    if (!Array.isArray(trades)) return trades;
+    return trades.map(t => ({
+        ...t,
+        beforePicture: null,
+        afterPicture: null,
+        beforePictureKey: t.beforePictureKey || null,
+        afterPictureKey: t.afterPictureKey || null
+    }));
+}
+
+// Safe localStorage with quota handling
+const safeLocalStorage = {
+    setItem: (key, value) => {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (e) {
+            if (e.name === 'QuotaExceededError') {
+                console.warn('Storage quota exceeded, clearing old data');
+                // Clear old trades if quota exceeded
+                const trades = JSON.parse(localStorage.getItem('trades') || '[]');
+                if (trades.length > 1000) {
+                    const recentTrades = trades.slice(-500);
+                    localStorage.setItem('trades', JSON.stringify(recentTrades));
+                    // Retry
+                    try {
+                        localStorage.setItem(key, value);
+                        return true;
+                    } catch (e2) {
+                        console.error('Still cannot save data:', e2);
+                        return false;
+                    }
+                }
+            }
+        }
+    },
+    getItem: (key) => {
+        try {
+            return localStorage.getItem(key);
+        } catch (e) {
+            console.error('Error reading from localStorage:', e);
+            return null;
+        }
+    },
+    removeItem: (key) => {
+        try {
+            localStorage.removeItem(key);
+            return true;
+        } catch (e) {
+            console.error('Error removing from localStorage:', e);
+            return false;
+        }
+    }
+};
+
+// Function to view approved trade details
+function viewTradeDetails(tradeId) {
+    const approvedTrades = getApprovedTrades();
+    const trade = approvedTrades.find(t => t.id === tradeId);
+    
+    if (!trade) {
+        console.error('Approved trade not found:', tradeId);
+        return;
+    }
+    
+    const detailsContent = document.getElementById('tradeDetailsContent');
+    if (!detailsContent) {
+        console.error('tradeDetailsContent element not found');
+        return;
+    }
+    
+    const rr = trade.takeProfit && trade.stopLoss && trade.entry ? 
+        Math.abs((trade.takeProfit - trade.entry) / (trade.entry - trade.stopLoss)).toFixed(2) : 'N/A';
+    
+    detailsContent.innerHTML = `
+        <div style="display: grid; gap: 16px;">
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Trade Information</h4>
+                <div style="display: grid; gap: 8px;">
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Pair:</span>
+                        <span class="trade-detail-value">${trade.pair || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Direction:</span>
+                        <span class="trade-detail-value">${trade.direction || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Status:</span>
+                        <span class="trade-detail-value">${trade.status || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Entry Time:</span>
+                        <span class="trade-detail-value">${trade.entryTime ? new Date(trade.entryTime).toLocaleString() : 'N/A'}</span>
+                    </div>
+                    ${trade.status === 'completed' ? `
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">Completion Time:</span>
+                            <span class="trade-detail-value">${trade.completionTime ? new Date(trade.completionTime).toLocaleString() : 'N/A'}</span>
+                        </div>
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">Outcome:</span>
+                            <span class="trade-detail-value">${trade.outcome || 'N/A'}</span>
+                        </div>
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">Exit:</span>
+                            <span class="trade-detail-value">${trade.exitPrice || 'N/A'}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Price Information</h4>
+                <div style="display: grid; gap: 8px;">
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Entry:</span>
+                        <span class="trade-detail-value">${trade.entry || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Stop Loss:</span>
+                        <span class="trade-detail-value">${trade.stopLoss || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Take Profit:</span>
+                        <span class="trade-detail-value">${trade.takeProfit || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Risk/Reward:</span>
+                        <span class="trade-detail-value">${rr}</span>
+                    </div>
+                    ${trade.status === 'completed' ? `
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">P/L:</span>
+                            <span class="trade-detail-value">${trade.pl === null || trade.pl === undefined ? 'N/A' : (trade.pl >= 0 ? '+' : '') + trade.pl.toFixed(5)}</span>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+            ${(trade.notes || trade.completionNotes) ? `
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Notes</h4>
+                ${trade.notes ? `<div style="background: rgba(51, 65, 85, 0.2); border-radius: 4px; padding: 8px; margin-bottom: 8px;">${String(trade.notes).replace(/\n/g,'<br>')}</div>` : ''}
+                ${trade.completionNotes ? `<div style="background: rgba(51, 65, 85, 0.2); border-radius: 4px; padding: 8px;">${String(trade.completionNotes).replace(/\n/g,'<br>')}</div>` : ''}
+            </div>
+            ` : ''}
+        </div>
+    `;
+    
+    const modal = document.getElementById('tradeDetailsModal');
+    if (modal) modal.style.display = 'flex';
+}
+
+// Android-safe event listeners
+const addAndroidSafeListener = (element, event, handler, options = {}) => {
+    if (!element) return;
+    
+    const androidOptions = isAndroidWebView() ? 
+        { passive: true, ...options } : 
+        options;
+    
+    // Handle touch/click conflicts on Android
+    if (event === 'click' && isAndroidWebView()) {
+        element.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            handler(e);
+        }, { passive: false });
+    } else {
+        element.addEventListener(event, handler, androidOptions);
+    }
+};
+
+// Android back button handling
+if (isAndroidWebView()) {
+    document.addEventListener('backbutton', (e) => {
+        e.preventDefault();
+        const sidebar = document.getElementById('sidebar');
+        if (sidebar && !sidebar.classList.contains('collapsed')) {
+            toggleSidebar();
+        } else {
+            // Show confirmation before closing
+            if (confirm('Exit ForexBuddy?')) {
+                navigator.app.exitApp();
+            }
+        }
+    });
+}
+
+// -------------------- Approved Trades Journal System --------------------
+let currentTradeForCompletion = null;
+let afterImageData = null;
+
+// Function to add approved trade to journal (only called after successful prompt completion)
+function addApprovedTradeToJournal(tradeData) {
+    const approvedTrade = {
+        id: 'approved-' + Date.now(),
+        ...tradeData,
+        status: tradeData.status || 'live',
+        entryTime: tradeData.entryTime || new Date().toISOString(),
+        beforePicture: tradeData.beforePicture || null,
+        afterPicture: null,
+        completionNotes: '',
+        outcome: null,
+        exitPrice: null,
+        pl: null,
+        approvalTime: new Date().toISOString()
+    };
+
+    if (approvedTrade.beforePicture) {
+        const key = persistTradeImage(approvedTrade.id, 'before', approvedTrade.beforePicture);
+        if (key) {
+            approvedTrade.beforePictureKey = key;
+            approvedTrade.beforePicture = null;
+        }
+    }
+    
+    // Get existing approved trades
+    const approvedTrades = getApprovedTrades();
+    approvedTrades.push(approvedTrade);
+    
+    // Save to approved trades storage
+    const ok = safeLocalStorage.setItem('approvedTrades', JSON.stringify(approvedTrades));
+    if (!ok) {
+        console.error('❌ Failed to persist approvedTrades via safeLocalStorage. Attempting direct localStorage fallback.');
+        try {
+            localStorage.setItem('approvedTrades', JSON.stringify(approvedTrades));
+        } catch (e) {
+            console.error('❌ Direct localStorage fallback also failed:', e);
+            if (e && e.name === 'QuotaExceededError') {
+                try {
+                    const stripped = stripApprovedTradeImages(approvedTrades);
+                    localStorage.setItem('approvedTrades', JSON.stringify(stripped));
+                    console.warn('Retried approvedTrades save after stripping images from stored trades');
+                } catch (e2) {
+                    console.error('❌ ApprovedTrades save still failing after stripping images:', e2);
+                }
+            }
+        }
+    }
+    
+    // Update displays
+    displayLiveTrades();
+    displayCompletedTrades();
+    
+    console.log('✅ Approved trade added to journal:', approvedTrade);
+    return approvedTrade;
+}
+
+// Function to get approved trades
+function getApprovedTrades() {
+    try {
+        return JSON.parse(safeLocalStorage.getItem('approvedTrades') || '[]');
+    } catch (e) {
+        console.error('Error loading approved trades:', e);
+        return [];
+    }
+}
+
+// Function to get live trades
+function getLiveTrades() {
+    const approvedTrades = getApprovedTrades();
+    return approvedTrades.filter(trade => trade.status === 'live');
+}
+
+// Function to get completed trades
+function getCompletedTrades() {
+    const approvedTrades = getApprovedTrades();
+    return approvedTrades.filter(trade => trade.status === 'completed');
+}
+
+// Function to display live trades
+function displayLiveTrades() {
+    const container = document.getElementById('liveTradesContainer');
+    if (!container) return;
+    
+    const liveTrades = getLiveTrades();
+    
+    if (liveTrades.length === 0) {
+        container.innerHTML = '<div class="empty-state">No live trades currently</div>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    liveTrades.forEach(trade => {
+        const tradeCard = createTradeCard(trade, 'live');
+        container.appendChild(tradeCard);
+    });
+}
+
+// Function to display completed trades
+function displayCompletedTrades() {
+    const container = document.getElementById('completedTradesContainer');
+    if (!container) return;
+    
+    const filter = document.getElementById('completedFilter')?.value || 'all';
+    let completedTrades = getCompletedTrades();
+    
+    // Apply filter
+    if (filter !== 'all') {
+        completedTrades = completedTrades.filter(trade => {
+            if (filter === 'win') return trade.outcome === 'TP';
+            if (filter === 'loss') return trade.outcome === 'SL';
+            if (filter === 'be') return trade.outcome === 'BE';
+            return true;
+        });
+    }
+    
+    if (completedTrades.length === 0) {
+        container.innerHTML = '<div class="empty-state">No completed trades yet</div>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    // Sort by completion time (newest first)
+    completedTrades.sort((a, b) => new Date(b.completionTime || 0) - new Date(a.completionTime || 0));
+    
+    completedTrades.forEach(trade => {
+        const tradeCard = createTradeCard(trade, 'completed');
+        container.appendChild(tradeCard);
+    });
+}
+
+// Function to create trade card HTML
+function createTradeCard(trade, status) {
+    const card = document.createElement('div');
+    card.className = `trade-card ${status} ${trade.outcome || ''}`;
+    
+    const rr = trade.takeProfit && trade.stopLoss && trade.entry ? 
+        Math.abs((trade.takeProfit - trade.entry) / (trade.entry - trade.stopLoss)).toFixed(2) : 'N/A';
+    
+    const beforeSrc = resolveTradeImage(trade, 'before');
+    const afterSrc = resolveTradeImage(trade, 'after');
+    const imgStyle = "width: 100%; height: 120px; max-height: 28vw; object-fit: cover; border-radius: 8px;";
+
+    card.innerHTML = `
+        <div class="trade-header">
+            <div class="trade-pair">${trade.pair || 'N/A'}</div>
+            <div class="trade-direction ${trade.direction?.toLowerCase()}">${trade.direction || 'N/A'}</div>
+            <div class="trade-status ${status}">${status === 'live' ? '🔴 LIVE' : '✅ COMPLETED'}</div>
+        </div>
+        <div class="trade-details">
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">Entry:</span>
+                <span class="trade-detail-value">${trade.entry || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">SL:</span>
+                <span class="trade-detail-value">${trade.stopLoss || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">TP:</span>
+                <span class="trade-detail-value">${trade.takeProfit || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">R:R:</span>
+                <span class="trade-detail-value">${rr}</span>
+            </div>
+            ${status === 'completed' ? `
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">Exit:</span>
+                <span class="trade-detail-value">${trade.exitPrice || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">P/L:</span>
+                <span class="trade-detail-value ${trade.pl >= 0 ? 'win' : trade.pl <= 0 ? 'loss' : 'be'}">
+                    ${trade.pl ? (trade.pl >= 0 ? '+' : '') + trade.pl.toFixed(5) : 'N/A'}
+                </span>
+            </div>
+            ` : ''}
+        </div>
+        <div class="trade-images">
+            ${beforeSrc ? `
+                <img src="${beforeSrc}" alt="Before" class="trade-image" style="${imgStyle}" onclick="viewImage('${beforeSrc}', 'Before Trade')">
+            ` : '<div class="trade-image" style="background: #475569; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 10px; border-radius: 8px; height: 120px;">No Before</div>'}
+            ${status === 'completed' && afterSrc ? `
+                <img src="${afterSrc}" alt="After" class="trade-image" style="${imgStyle}" onclick="viewImage('${afterSrc}', 'After Trade')">
+            ` : status === 'completed' ? '<div class="trade-image" style="background: #475569; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 10px; border-radius: 8px; height: 120px;">No After</div>' : '<div class="trade-image" style="background: #ef4444; display: flex; align-items: center; justify-content: center; color: white; font-size: 10px; border-radius: 8px; height: 120px;">LIVE</div>'}
+        </div>
+        <div class="trade-actions">
+            <button class="btn-small btn-primary" onclick="viewTradeDetails('${trade.id}')">View Details</button>
+            ${status === 'live' ? `<button class="btn-small btn-secondary" onclick="openTradeCompletionModal('${trade.id}')">Complete Trade</button>` : ''}
+            ${status === 'completed' ? `
+                <div class="trade-outcome">
+                    <span class="outcome-badge ${trade.outcome?.toLowerCase()}">${trade.outcome || 'UNKNOWN'}</span>
+                    ${trade.completionNotes ? `<button class="btn-small btn-info" onclick="viewCompletionNotes('${trade.id}')">View Notes</button>` : ''}
+                </div>
+            ` : ''}
+        </div>
+    `;
+    
+    return card;
+}
+
+// Function to view completion notes
+function viewCompletionNotes(tradeId) {
+    const approvedTrades = getApprovedTrades();
+    const trade = approvedTrades.find(t => t.id === tradeId);
+    
+    if (!trade || !trade.completionNotes) {
+        alert('No completion notes found for this trade');
+        return;
+    }
+    
+    // Create modal for completion notes
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📝 Trade Completion Notes</h3>
+                <button class="modal-close" onclick="this.closest('.modal').remove()">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="trade-summary">
+                    <p><strong>Pair:</strong> ${trade.pair || 'N/A'}</p>
+                    <p><strong>Direction:</strong> ${trade.direction || 'N/A'}</p>
+                    <p><strong>Outcome:</strong> <span class="outcome-badge ${trade.outcome?.toLowerCase()}">${trade.outcome || 'UNKNOWN'}</span></p>
+                    <p><strong>P/L:</strong> <span class="${trade.pl >= 0 ? 'win' : 'loss'}">${trade.pl ? (trade.pl >= 0 ? '+' : '') + trade.pl.toFixed(5) : 'N/A'}</span></p>
+                </div>
+                <div class="completion-notes">
+                    <h4>📖 Thoughts & Lessons Learned:</h4>
+                    <div class="notes-content">${trade.completionNotes.replace(/\n/g, '<br>')}</div>
+                </div>
+                ${trade.afterPicture ? `
+                    <div class="after-picture">
+                        <h4>📸 After Trade Picture:</h4>
+                        <img src="${trade.afterPicture}" alt="After Trade" style="max-width: 100%; border-radius: 8px;">
+                    </div>
+                ` : ''}
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    modal.style.display = 'flex';
+}
+
+// Function to open trade completion modal
+function openTradeCompletionModal(tradeId) {
+    const approvedTrades = getApprovedTrades();
+    const trade = approvedTrades.find(t => t.id === tradeId);
+    
+    if (!trade) {
+        console.error('Trade not found:', tradeId);
+        return;
+    }
+    
+    currentTradeForCompletion = trade;
+    
+    // Reset form
+    document.getElementById('completionOutcome').value = '';
+    document.getElementById('exitPrice').value = '';
+    document.getElementById('completionNotes').value = '';
+    document.getElementById('afterPicture').value = '';
+    document.getElementById('afterPicturePreview').innerHTML = '<div style="color: #94a3b8;">Click to add after picture</div>';
+    afterImageData = null;
+    
+    // Show modal
+    document.getElementById('tradeCompletionModal').style.display = 'flex';
+}
+
+// Function to complete trade
+function completeTrade() {
+    if (!currentTradeForCompletion) {
+        console.error('No trade selected for completion');
+        return;
+    }
+    
+    const outcome = document.getElementById('completionOutcome').value;
+    const exitPrice = parseFloat(document.getElementById('exitPrice').value);
+    const completionNotes = document.getElementById('completionNotes').value.trim();
+    
+    if (!outcome || !exitPrice) {
+        alert('Please fill in all required fields');
+        return;
+    }
+    
+    // Calculate P/L
+    const entryPrice = currentTradeForCompletion.entry;
+    const stopLoss = currentTradeForCompletion.stopLoss;
+    const takeProfit = currentTradeForCompletion.takeProfit;
+    
+    let pl = 0;
+    if (currentTradeForCompletion.direction === 'BUY') {
+        pl = exitPrice - entryPrice;
+    } else {
+        pl = entryPrice - exitPrice;
+    }
+    
+    // Update trade data
+    const approvedTrades = getApprovedTrades();
+    const tradeIndex = approvedTrades.findIndex(t => t.id === currentTradeForCompletion.id);
+    
+    if (tradeIndex !== -1) {
+        let updatedAfterPicture = afterImageData || null;
+        let afterPictureKey = null;
+        if (updatedAfterPicture) {
+            afterPictureKey = persistTradeImage(currentTradeForCompletion.id, 'after', updatedAfterPicture);
+            if (afterPictureKey) updatedAfterPicture = null;
+        }
+
+        approvedTrades[tradeIndex] = {
+            ...approvedTrades[tradeIndex],
+            status: 'completed',
+            outcome: outcome,
+            exitPrice: exitPrice,
+            pl: pl,
+            completionNotes: completionNotes,
+            afterPicture: updatedAfterPicture,
+            afterPictureKey: afterPictureKey || approvedTrades[tradeIndex].afterPictureKey || null,
+            completionTime: new Date().toISOString()
+        };
+        
+        // Save to approved trades storage
+        safeLocalStorage.setItem('approvedTrades', JSON.stringify(approvedTrades));
+        
+        // Update displays
+        displayLiveTrades();
+        displayCompletedTrades();
+        
+        // Close modal
+        closeTradeCompletionModal();
+        
+        // Show success message
+        showToast(`Trade completed as ${outcome}! P/L: ${pl >= 0 ? '+' : ''}${pl.toFixed(5)}`, 3000);
+        
+        console.log('✅ Trade completed:', approvedTrades[tradeIndex]);
+    }
+}
+
+// Function to close trade completion modal
+function closeTradeCompletionModal() {
+    document.getElementById('tradeCompletionModal').style.display = 'none';
+    currentTradeForCompletion = null;
+}
+
+// Function to close trade details modal
+function closeTradeDetailsModal() {
+    document.getElementById('tradeDetailsModal').style.display = 'none';
+}
+
+// Function to view full image
+function viewImage(imageSrc, title) {
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 90%; max-height: 90%;">
+            <div class="modal-header">
+                <h3>${title}</h3>
+                <button class="modal-close" onclick="this.closest('.modal').remove()">✕</button>
+            </div>
+            <div class="modal-body" style="text-align: center;">
+                <img src="${imageSrc}" style="max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 8px;">
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+}
+
+// Function to clear completed trades
+function clearCompletedTrades() {
+    if (!confirm('Are you sure you want to clear all completed trades? This cannot be undone.')) {
+        return;
+    }
+    
+    const approvedTrades = getApprovedTrades();
+    const liveTrades = approvedTrades.filter(trade => trade.status === 'live');
+    
+    // Keep only live trades
+    safeLocalStorage.setItem('approvedTrades', JSON.stringify(liveTrades));
+    
+    // Update displays
+    displayLiveTrades();
+    displayCompletedTrades();
+    
+    showToast('All completed trades cleared', 2000);
+}
+
+// Function to add unapproved trade to journal
+function addUnapprovedTradeToJournal(tradeData) {
+    const unapprovedTrade = {
+        id: 'unapproved-' + Date.now(),
+        ...tradeData,
+        status: 'unapproved',
+        entryTime: new Date().toISOString(),
+        beforePicture: tradeData.beforePicture || null,
+        afterPicture: null,
+        completionNotes: '',
+        outcome: null,
+        exitPrice: null,
+        pl: null,
+        rejectionReason: tradeData.rejectionReason || 'Trade did not meet criteria',
+        unapprovedTime: new Date().toISOString()
+    };
+    
+    // Get existing unapproved trades
+    const unapprovedTrades = getUnapprovedTrades();
+    unapprovedTrades.push(unapprovedTrade);
+    
+    // Save to unapproved trades storage
+    safeLocalStorage.setItem('unapprovedTrades', JSON.stringify(unapprovedTrades));
+    
+    // Update displays
+    displayLiveTrades();
+    displayCompletedTrades();
+    displayUnapprovedTrades();
+    
+    console.log('❌ Unapproved trade added to journal:', unapprovedTrade);
+    return unapprovedTrade;
+}
+
+// Function to get unapproved trades
+function getUnapprovedTrades() {
+    try {
+        return JSON.parse(safeLocalStorage.getItem('unapprovedTrades') || '[]');
+    } catch (e) {
+        console.error('Error loading unapproved trades:', e);
+        return [];
+    }
+}
+
+// Function to display unapproved trades
+function displayUnapprovedTrades() {
+    const container = document.getElementById('unapprovedTradesContainer');
+    if (!container) return;
+    
+    const filter = document.getElementById('unapprovedFilter')?.value || 'all';
+    let unapprovedTrades = getUnapprovedTrades();
+    
+    // Sort by unapproved time (most recent first) for deterministic rendering
+    unapprovedTrades.sort((a, b) => new Date(b.unapprovedTime || 0) - new Date(a.unapprovedTime || 0));
+    
+    // Apply filter deterministically
+    if (filter === 'recent') {
+        unapprovedTrades = unapprovedTrades.slice(0, 5);
+    } else if (filter === 'criteria') {
+        unapprovedTrades = unapprovedTrades.filter(trade => trade.rejectionReason && trade.rejectionReason.includes('criteria'));
+    } else if (filter === 'devils') {
+        unapprovedTrades = unapprovedTrades.filter(trade => trade.rejectionReason && trade.rejectionReason.includes('devil'));
+    }
+    
+    if (unapprovedTrades.length === 0) {
+        container.innerHTML = '<div class="empty-state">No unapproved trades yet</div>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    unapprovedTrades.forEach(trade => {
+        const tradeCard = createUnapprovedTradeCard(trade);
+        container.appendChild(tradeCard);
+    });
+}
+
+// Function to create unapproved trade card HTML
+function createUnapprovedTradeCard(trade) {
+    const card = document.createElement('div');
+    card.className = `trade-card unapproved ${trade.rejectionReason && trade.rejectionReason.includes('criteria') ? 'failed-criteria' : ''} ${trade.rejectionReason && trade.rejectionReason.includes('devil') ? 'devils-trap' : ''}`;
+    
+    card.innerHTML = `
+        <div class="trade-header">
+            <div class="trade-pair">${trade.pair || 'N/A'}</div>
+            <div class="trade-direction ${trade.direction?.toLowerCase()}">${trade.direction || 'N/A'}</div>
+            <div class="trade-status unapproved">❌ UNAPPROVED</div>
+        </div>
+        <div class="trade-details">
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">Entry:</span>
+                <span class="trade-detail-value">${trade.entry || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">SL:</span>
+                <span class="trade-detail-value">${trade.stopLoss || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">TP:</span>
+                <span class="trade-detail-value">${trade.takeProfit || 'N/A'}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">R:R:</span>
+                <span class="trade-detail-value">${trade.takeProfit && trade.stopLoss && trade.entry ? 
+                    Math.abs((trade.takeProfit - trade.entry) / (trade.entry - trade.stopLoss)).toFixed(2) : 'N/A'}</span>
+            </div>
+        </div>
+        <div class="trade-images">
+            ${trade.beforePicture ? `
+                <img src="${trade.beforePicture}" alt="Before" class="trade-image" onclick="viewImage('${trade.beforePicture}', 'Before Trade')">
+            ` : '<div class="trade-image" style="background: #475569; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 10px;">No Before</div>'}
+        </div>
+        <div class="trade-rejection-reason">
+            <strong>Rejection Reason:</strong> ${trade.rejectionReason || 'Unknown'}
+        </div>
+        <div class="trade-details">
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">Unapproved Time:</span>
+                <span class="trade-detail-value">${new Date(trade.unapprovedTime).toLocaleString()}</span>
+            </div>
+            <div class="trade-detail-item">
+                <span class="trade-detail-label">Entry Time:</span>
+                <span class="trade-detail-value">${new Date(trade.entryTime).toLocaleString()}</span>
+            </div>
+        </div>
+        <div class="trade-actions">
+            <button class="btn-small btn-primary" onclick="viewUnapprovedTradeDetails('${trade.id}')">View Details</button>
+            <button class="btn-small btn-secondary" onclick="deleteUnapprovedTrade('${trade.id}')">Delete</button>
+        </div>
+    `;
+    
+    return card;
+}
+
+// Function to view unapproved trade details
+function viewUnapprovedTradeDetails(tradeId) {
+    const unapprovedTrades = getUnapprovedTrades();
+    const trade = unapprovedTrades.find(t => t.id === tradeId);
+    
+    if (!trade) {
+        console.error('Unapproved trade not found:', tradeId);
+        return;
+    }
+    
+    const detailsContent = document.getElementById('tradeDetailsContent');
+    const rr = trade.takeProfit && trade.stopLoss && trade.entry ? 
+        Math.abs((trade.takeProfit - trade.entry) / (trade.entry - trade.stopLoss)).toFixed(2) : 'N/A';
+    
+    detailsContent.innerHTML = `
+        <div style="display: grid; gap: 16px;">
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Unapproved Trade Information</h4>
+                <div style="display: grid; gap: 8px;">
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Pair:</span>
+                        <span class="trade-detail-value">${trade.pair || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Direction:</span>
+                        <span class="trade-detail-value">${trade.direction || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Status:</span>
+                        <span class="trade-detail-value" style="color: #dc2626;">${trade.status}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Entry Time:</span>
+                        <span class="trade-detail-value">${new Date(trade.entryTime).toLocaleString()}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Unapproved Time:</span>
+                        <span class="trade-detail-value">${new Date(trade.unapprovedTime).toLocaleString()}</span>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Price Information</h4>
+                <div style="display: grid; gap: 8px;">
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Entry:</span>
+                        <span class="trade-detail-value">${trade.entry || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Stop Loss:</span>
+                        <span class="trade-detail-value">${trade.stopLoss || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Take Profit:</span>
+                        <span class="trade-detail-value">${trade.takeProfit || 'N/A'}</span>
+                    </div>
+                    <div class="trade-detail-item">
+                        <span class="trade-detail-label">Risk/Reward:</span>
+                        <span class="trade-detail-value">${rr}</span>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Rejection Details</h4>
+                <div style="background: rgba(220, 38, 38, 0.2); border: 1px solid #dc2626; border-radius: 4px; padding: 8px; margin-top: 8px;">
+                    <strong style="color: #dc2626; display: block; margin-bottom: 4px;">Rejection Reason:</strong> ${trade.rejectionReason || 'Unknown'}
+                </div>
+            </div>
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Images</h4>
+                <div class="trade-images">
+                    ${trade.beforePicture ? `
+                        <div>
+                            <div style="color: #94a3b8; font-size: 12px; margin-bottom: 4px;">Before Trade</div>
+                            <img src="${trade.beforePicture}" alt="Before" class="trade-image" onclick="viewImage('${trade.beforePicture}', 'Before Trade')" style="width: 120px; height: 90px;">
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+            ${trade.answers ? `
+            <div>
+                <h4 style="color: #e2e8f0; margin-bottom: 8px;">Prompt Responses</h4>
+                <div style="background: rgba(51, 65, 85, 0.2); border-radius: 4px; padding: 8px;">
+                    ${trade.answers.map((answer, index) => {
+                        const prompt = prompts[index];
+                        return `
+                            <div style="margin-bottom: 8px;">
+                                <strong>${prompt.text || 'N/A'}</strong>
+                                <div style="color: ${answer === 'yes' ? '#22c55e' : '#ef4444'}; font-weight: bold; margin-top: 4px;">
+                                    ${answer.toUpperCase()}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+            </div>
+            ` : ''}
+        </div>
+    `;
+    
+    // Show modal
+    document.getElementById('tradeDetailsModal').style.display = 'flex';
+}
+
+// Function to delete unapproved trade
+function deleteUnapprovedTrade(tradeId) {
+    if (!confirm('Are you sure you want to delete this unapproved trade? This cannot be undone.')) {
+        return;
+    }
+    
+    const unapprovedTrades = getUnapprovedTrades();
+    const tradeIndex = unapprovedTrades.findIndex(t => t.id === tradeId);
+    
+    if (tradeIndex !== -1) {
+        const deleted = unapprovedTrades.splice(tradeIndex, 1)[0];
+        safeLocalStorage.setItem('unapprovedTrades', JSON.stringify(unapprovedTrades));
+        
+        // Update displays
+        displayUnapprovedTrades();
+        
+        showToast('Unapproved trade deleted', 2000);
+        console.log('❌ Unapproved trade deleted:', deleted);
+    }
+}
+
+// Function to clear all unapproved trades
+function clearUnapprovedTrades() {
+    if (!confirm('Are you sure you want to clear all unapproved trades? This cannot be undone.')) {
+        return;
+    }
+    
+    safeLocalStorage.setItem('unapprovedTrades', JSON.stringify([]));
+    
+    // Update displays
+    displayUnapprovedTrades();
+    displayLiveTrades();
+    displayCompletedTrades();
+    
+    showToast('All unapproved trades cleared', 2000);
+}
+
+// Function to handle unapproved filter change
+function handleUnapprovedFilterChange() {
+    displayUnapprovedTrades();
+}
+
+// Function to toggle sidebar
 function toggleSidebar() {
     console.log('Toggling sidebar');
     const sidebar = document.getElementById('sidebar');
@@ -36,13 +967,27 @@ function navigateTo(section) {
     // Hide all sections
     document.querySelectorAll('.content-section').forEach(sec => {
         sec.classList.remove('active');
+        sec.classList.add('hidden');
     });
     
     // Show target section
     const targetSection = document.getElementById(section + 'Section');
     if (targetSection) {
         targetSection.classList.add('active');
+        targetSection.classList.remove('hidden');
         console.log('Section found and activated:', section + 'Section');
+
+        // Ensure analytics renders when the user navigates there.
+        if (section === 'analytics') {
+            try {
+                const completed = getApprovedCompletedTrades();
+                renderEquityChart(completed);
+                attachChartTooltip();
+                renderPhase4Dashboard();
+            } catch (e) {
+                console.error('Analytics render failed on navigation:', e);
+            }
+        }
     } else {
         console.error('Section not found:', section + 'Section');
     }
@@ -88,13 +1033,40 @@ function clearJournalFilters() {
 }
 
 function applyAnalyticsFilters() {
-    console.log('Applying analytics filters');
-    // Implementation needed
+    try {
+        console.log('Applying analytics filters');
+
+        const ds = document.getElementById('analytics_dateStart')?.value || '';
+        const de = document.getElementById('analytics_dateEnd')?.value || '';
+        const strat = document.getElementById('analytics_strategy')?.value || '';
+
+        // Bridge the analytics toolbar to the Phase 4 filtering system.
+        // Keep IDs/names stable to avoid breaking the rest of the app.
+        currentFilters.dateStart = ds;
+        currentFilters.dateEnd = de;
+        currentFilters.strategy = strat;
+
+        renderPhase4Dashboard();
+
+        // Equity curve is outside Phase 4 cards; keep it refreshed too.
+        const completed = getApprovedCompletedTrades();
+        renderEquityChart(completed);
+        attachChartTooltip();
+    } catch (e) {
+        console.error('Failed to apply analytics filters:', e);
+    }
 }
 
 function downloadData(format) {
     console.log('Downloading data as', format);
-    // Implementation needed
+    try {
+        if (String(format).toLowerCase() === 'csv') return exportCSV();
+        if (String(format).toLowerCase() === 'json') return exportJSON();
+        showToast('Unknown export format: ' + format, 2500);
+    } catch (e) {
+        console.error('Download failed:', e);
+        showToast('Download failed', 2500);
+    }
 }
 
 function quickStartTrade() {
@@ -119,11 +1091,281 @@ function savePromptImageForType() {
 
 function addCriteria() {
     console.log('Adding criteria');
-    // Implementation needed
+    const input = document.getElementById('newCriteria');
+    const criteriaText = input.value.trim();
+    
+    if (!criteriaText) {
+        alert('Please enter a trading criterion');
+        return;
+    }
+    
+    // Get existing criteria
+    let criteria = [];
+    try {
+        criteria = JSON.parse(safeLocalStorage.getItem('tradingCriteria') || '[]');
+    } catch (e) {
+        console.error('Error loading criteria:', e);
+        criteria = [];
+    }
+    
+    // Add new criterion
+    criteria.push(criteriaText);
+    
+    // Save using safe storage
+    const success = safeLocalStorage.setItem('tradingCriteria', JSON.stringify(criteria));
+    if (!success) {
+        alert('Error saving criterion - storage may be full');
+        return;
+    }
+    
+    // Clear input
+    input.value = '';
+    
+    // Update display
+    displayCriteriaList();
+    
+    // Show success feedback
+    const messageEl = document.getElementById('criteriaMessage') || createMessageElement('criteriaMessage');
+    messageEl.textContent = '✅ Criterion added successfully!';
+    messageEl.style.color = '#22c55e';
+    
+    setTimeout(() => {
+        if (messageEl.parentNode) {
+            messageEl.textContent = '';
+        }
+    }, 3000);
+    
+    console.log('✅ Trading criterion saved:', criteriaText);
 }
 
 function addDevilsLie() {
     console.log('Adding devils lie');
+    const input = document.getElementById('newDevilsLie');
+    const riskSelect = document.getElementById('devilsLieRisk');
+    const lieText = input.value.trim();
+    const riskLevel = riskSelect.value;
+    
+    if (!lieText) {
+        alert('Please enter a devil\'s lie pattern');
+        return;
+    }
+    
+    // Get existing devils lies
+    let devilsLies = [];
+    try {
+        devilsLies = JSON.parse(safeLocalStorage.getItem('devilsLies') || '[]');
+    } catch (e) {
+        console.error('Error loading devils lies:', e);
+        devilsLies = [];
+    }
+    
+    // Add new devils lie with risk level
+    const newLie = {
+        id: 'lie-' + Date.now(),
+        text: lieText,
+        risk: riskLevel,
+        createdAt: new Date().toISOString()
+    };
+    
+    devilsLies.push(newLie);
+    
+    // Save using safe storage
+    const success = safeLocalStorage.setItem('devilsLies', JSON.stringify(devilsLies));
+    if (!success) {
+        alert('Error saving devil\'s lie - storage may be full');
+        return;
+    }
+    
+    // Clear inputs
+    input.value = '';
+    riskSelect.value = 'Medium';
+    
+    // Update display
+    displayDevilsLieList();
+    
+    // Show success feedback
+    const messageEl = document.getElementById('devilsLieMessage') || createMessageElement('devilsLieMessage');
+    messageEl.textContent = '✅ Devil\'s lie pattern added successfully!';
+    messageEl.style.color = '#22c55e';
+    
+    setTimeout(() => {
+        if (messageEl.parentNode) {
+            messageEl.textContent = '';
+        }
+    }, 3000);
+    
+    console.log('✅ Devil\'s lie saved:', newLie);
+}
+
+function displayCriteriaList() {
+    const container = document.getElementById('criteriaList');
+    if (!container) return;
+    
+    let criteria = [];
+    try {
+        criteria = JSON.parse(safeLocalStorage.getItem('tradingCriteria') || '[]');
+    } catch (e) {
+        console.error('Error loading criteria for display:', e);
+        criteria = [];
+    }
+    
+    container.innerHTML = '';
+    
+    if (criteria.length === 0) {
+        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No trading criteria added yet</div>';
+        return;
+    }
+    
+    criteria.forEach((criterion, index) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px; margin-bottom: 4px; background: rgba(51, 65, 85, 0.3); border-radius: 4px;';
+        
+        item.innerHTML = `
+            <span style="color: #e2e8f0;">${criterion}</span>
+            <button onclick="removeCriteria(${index})" style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">Remove</button>
+        `;
+        
+        container.appendChild(item);
+    });
+}
+
+function displayDevilsLieList() {
+    const container = document.getElementById('devilsLieList');
+    if (!container) return;
+    
+    let devilsLies = [];
+    try {
+        devilsLies = JSON.parse(safeLocalStorage.getItem('devilsLies') || '[]');
+    } catch (e) {
+        console.error('Error loading devils lies for display:', e);
+        devilsLies = [];
+    }
+    
+    container.innerHTML = '';
+    
+    if (devilsLies.length === 0) {
+        container.innerHTML = '<div style="color: #94a3b8; text-align: center; padding: 20px;">No devil\'s lie patterns added yet</div>';
+        return;
+    }
+    
+    devilsLies.forEach((lie, index) => {
+        const item = document.createElement('div');
+        item.style.cssText = 'display: flex; justify-content: space-between; align-items: center; padding: 8px; margin-bottom: 4px; background: rgba(51, 65, 85, 0.3); border-radius: 4px;';
+        
+        const riskColor = lie.risk === 'High' ? '#ef4444' : lie.risk === 'Medium' ? '#f59e0b' : '#22c55e';
+        
+        item.innerHTML = `
+            <div style="flex: 1;">
+                <div style="color: #e2e8f0; margin-bottom: 4px;">${lie.text}</div>
+                <div style="color: ${riskColor}; font-size: 12px; font-weight: bold;">${lie.risk} Risk</div>
+            </div>
+            <button onclick="removeDevilsLie(${index})" style="background: #ef4444; color: white; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 12px;">Remove</button>
+        `;
+        
+        container.appendChild(item);
+    });
+}
+
+function removeCriteria(index) {
+    if (!confirm('Remove this trading criterion?')) return;
+    
+    let criteria = [];
+    try {
+        criteria = JSON.parse(safeLocalStorage.getItem('tradingCriteria') || '[]');
+    } catch (e) {
+        console.error('Error loading criteria for removal:', e);
+        return;
+    }
+    
+    const removed = criteria.splice(index, 1)[0];
+    safeLocalStorage.setItem('tradingCriteria', JSON.stringify(criteria));
+    
+    displayCriteriaList();
+    console.log('✅ Trading criterion removed:', removed);
+}
+
+function removeDevilsLie(index) {
+    if (!confirm('Remove this devil\'s lie pattern?')) return;
+    
+    let devilsLies = [];
+    try {
+        devilsLies = JSON.parse(safeLocalStorage.getItem('devilsLies') || '[]');
+    } catch (e) {
+        console.error('Error loading devils lies for removal:', e);
+        return;
+    }
+    
+    const removed = devilsLies.splice(index, 1)[0];
+    safeLocalStorage.setItem('devilsLies', JSON.stringify(devilsLies));
+    
+    displayDevilsLieList();
+    console.log('✅ Devil\'s lie removed:', removed.text);
+}
+
+function createMessageElement(id) {
+    const existing = document.getElementById(id);
+    if (existing) return existing;
+    
+    const messageEl = document.createElement('div');
+    messageEl.id = id;
+    messageEl.style.cssText = 'margin-top: 8px; font-size: 14px; font-weight: 500;';
+    
+    // Find appropriate parent to append to
+    const newCriteriaInput = document.getElementById('newCriteria');
+    if (newCriteriaInput) {
+        newCriteriaInput.parentNode.appendChild(messageEl);
+    }
+    
+    return messageEl;
+}
+
+function applySidebarFilters() {
+    console.log('Applying sidebar filters');
+    // Implementation needed
+}
+
+function clearSidebarFilters() {
+    console.log('Clearing sidebar filters');
+    // Implementation needed
+}
+
+function applyJournalFilters() {
+    console.log('Applying journal filters');
+    // Implementation needed
+}
+
+function clearJournalFilters() {
+    console.log('Clearing journal filters');
+    // Implementation needed
+}
+
+function applyAnalyticsFilters__legacy() {
+    console.log('Applying analytics filters');
+}
+
+function downloadData__placeholder(format) {
+    console.log('Downloading data as', format);
+    // Placeholder for older builds; main implementation is defined earlier.
+    return false;
+}
+
+function quickStartTrade() {
+    console.log('Quick start trade');
+    // Implementation needed
+}
+
+function saveLogoSettings() {
+    console.log('Saving logo settings');
+    // Implementation needed
+}
+
+function handleLogoUpload(event) {
+    console.log('Handling logo upload', event);
+    // Implementation needed
+}
+
+function savePromptImageForType() {
+    console.log('Saving prompt image for type');
     // Implementation needed
 }
 
@@ -137,8 +1379,20 @@ function saveAllSettings() {
 const placeholderImage = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='200' viewBox='0 0 400 200'%3E%3Crect width='400' height='200' fill='%23334155'/%3E%3Ctext x='200' y='100' font-family='Arial' font-size='20' text-anchor='middle' fill='%23e2e8f0'%3EPrompt Image%3C/text%3E%3C/svg%3E";
 
 // Criteria and Devil's Lies
-const criteriaList = ["RSI below 30", "Price above 200 MA", "Trend is up"];
-const devilList = ["Do not trade during news", "Low liquidity pair", "High spread"];
+const criteriaList = [
+    "Identified bullish and bearish structure",
+    "Identified liquidity road map", 
+    "Identified stop hunt liquidity on HTF",
+    "Identified DOL",
+    "Identified PD array",
+    "Identified LTF CHOCH (if used)"
+];
+const devilList = [
+    "Failed structure in order flow",
+    "Predetermined target liquidity hunt and PD array not taken",
+    "Target PD array already mitigated",
+    "DOL already taken"
+];
 
 // Global variables
 let prompts = [];
@@ -146,10 +1400,13 @@ let answers = [];
 let promptIndex = 0;
 let currentDecision = null; // Store the decision globally
 
+// Prevent slider auto-answering: require user interaction per prompt
+let sliderMovedForCurrentPrompt = false;
+
 // -------------------- Settings Storage Functions --------------------
 function savePreTradeSettings() {
     const settings = {
-        minConfluence: minConfluenceInput?.value || 6,
+        minConfluence: minConfluenceInput?.value || 4, // Changed from 6 to 4 - more reasonable
         maxTradesPerDay: maxTradesPerDayInput?.value || 6,
         lossCooldown: lossCooldownInput?.value || 30
     };
@@ -203,6 +1460,134 @@ function loadAllSettings() {
     loadPreTradeSettings();
     loadAccountSettings();
     loadEmotionalSettings();
+    
+    // Initialize user's custom criteria and devils lies if not present
+    initializeUserTradingData();
+    initializeUserDevilsLies(); // Initialize devil's lie patterns
+    
+    // Initialize criteria and devils lie displays
+    displayCriteriaList();
+    displayDevilsLieList();
+}
+
+function initializeUserTradingData() {
+    // Initialize trading criteria if empty
+    let existingCriteria = [];
+    try {
+        existingCriteria = JSON.parse(safeLocalStorage.getItem('tradingCriteria') || '[]');
+    } catch (e) {
+        console.error('Error checking existing criteria:', e);
+        existingCriteria = [];
+    }
+    
+    if (existingCriteria.length === 0) {
+        // Pre-populate with user's exact criteria
+        const userCriteria = [
+            "Identified bullish and bearish structure",
+            "Identified liquidity road map", 
+            "Identified stop hunt liquidity on HTF",
+            "Identified DOL",
+            "Identified PD array",
+            "Identified LTF CHOCH (if used)"
+        ];
+        safeLocalStorage.setItem('tradingCriteria', JSON.stringify(userCriteria));
+        console.log('✅ Initialized user trading criteria:', userCriteria);
+    } else {
+        // Remove duplicates from existing criteria
+        const uniqueCriteria = [...new Set(existingCriteria)];
+        if (uniqueCriteria.length !== existingCriteria.length) {
+            safeLocalStorage.setItem('tradingCriteria', JSON.stringify(uniqueCriteria));
+            console.log('✅ Removed duplicates from trading criteria:', uniqueCriteria);
+        }
+    }
+    
+    // Initialize devils lies if empty
+    let existingDevilsLies = [];
+    try {
+        existingDevilsLies = JSON.parse(safeLocalStorage.getItem('devilsLies') || '[]');
+    } catch (e) {
+        console.error('Error checking existing devils lies:', e);
+        existingDevilsLies = [];
+    }
+    
+    if (existingDevilsLies.length === 0) {
+        // Pre-populate with user's exact devil's lies
+        const userDevilsLies = [
+            {
+                id: 'lie-1',
+                text: "Failed structure in order flow",
+                risk: "High",
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'lie-2', 
+                text: "Predetermined target liquidity hunt and PD array not taken",
+                risk: "High",
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'lie-3',
+                text: "Target PD array already mitigated",
+                risk: "Medium", 
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'lie-4',
+                text: "DOL already taken",
+                risk: "High",
+                createdAt: new Date().toISOString()
+            }
+        ];
+        safeLocalStorage.setItem('devilsLies', JSON.stringify(userDevilsLies));
+        console.log('✅ Initialized user devils lies:', userDevilsLies);
+    } else {
+        // Remove duplicates from existing devils lies
+        const uniqueDevilsLies = existingDevilsLies.filter((lie, index, self) => {
+            const text = typeof lie === 'string' ? lie : lie.text;
+            return index === self.findIndex(l => {
+                const lText = typeof l === 'string' ? l : l.text;
+                return lText === text;
+            });
+        });
+        if (uniqueDevilsLies.length !== existingDevilsLies.length) {
+            safeLocalStorage.setItem('devilsLies', JSON.stringify(uniqueDevilsLies));
+            console.log('✅ Removed duplicates from devils lies:', uniqueDevilsLies);
+        }
+    }
+}
+
+function validatePromptSequence() {
+    const tradingCriteria = getTradingCriteria();
+    const devilLies = getDevilsLiePatterns();
+    
+    // Check for duplicates within trading criteria
+    const criteriaDuplicates = tradingCriteria.filter((item, index) => 
+        tradingCriteria.indexOf(item) !== index
+    );
+    
+    // Check for duplicates within devils lies
+    const lieDuplicates = devilLies.filter((item, index) => {
+        const text = typeof item === 'string' ? item : item.text;
+        return index !== devilLies.findIndex(l => {
+            const lText = typeof l === 'string' ? l : l.text;
+            return lText === text;
+        });
+    });
+    
+    if (criteriaDuplicates.length > 0) {
+        console.warn('⚠️ Found duplicate trading criteria:', criteriaDuplicates);
+    }
+    
+    if (lieDuplicates.length > 0) {
+        console.warn('⚠️ Found duplicate devil\'s lies:', lieDuplicates);
+    }
+    
+    return {
+        criteriaDuplicates: criteriaDuplicates.length,
+        lieDuplicates: lieDuplicates.length,
+        totalCriteria: tradingCriteria.length,
+        totalDevilsLies: devilLies.length
+    };
 }
 
 // -------------------- Elements --------------------
@@ -367,15 +1752,21 @@ function getInputNumber(id, fallback = 0) {
 function checkStrategyRules(tradeIdea, rules) {
     // rules: array of rule objects; here find a rule matching strategy name
     if (!rules || !rules.length) return { ok: true };
-    const rule = rules.find(r => r.strategyName === (tradeIdea.strategy || strategyInput.value));
+    const strategyName = String(tradeIdea.strategy || strategyInput?.value || '').trim().toLowerCase();
+    const rule = rules.find(r => String(r.strategyName || '').trim().toLowerCase() === strategyName);
     if (!rule) return { ok: true };
     // check allowed sessions
     if (rule.allowedSessions && rule.allowedSessions.length) {
-        if (!rule.allowedSessions.includes(tradeIdea.session)) return { ok: false, reason: 'Session not allowed by strategy' };
+        const session = String(tradeIdea.session || localStorage.getItem('currentSession') || '').trim().toLowerCase();
+        const allowed = rule.allowedSessions.map(s => String(s).trim().toLowerCase());
+        if (session && !allowed.includes(session)) return { ok: false, reason: 'Session not allowed by strategy' };
     }
     // check min RR
-    if (rule.minRR && tradeIdea.sl && tradeIdea.tp && tradeIdea.entry) {
-        const rr = Math.abs((tradeIdea.tp - tradeIdea.entry) / (tradeIdea.entry - tradeIdea.sl));
+    const entry = parseFloat(tradeIdea.entry);
+    const sl = parseFloat(tradeIdea.sl ?? tradeIdea.stopLoss);
+    const tp = parseFloat(tradeIdea.tp ?? tradeIdea.takeProfit);
+    if (rule.minRR && Number.isFinite(entry) && Number.isFinite(sl) && Number.isFinite(tp)) {
+        const rr = Math.abs((tp - entry) / (entry - sl));
         if (rr < rule.minRR) return { ok: false, reason: 'Risk/Reward below minimum' };
     }
     // required confluences (basic check against computeConfluenceScore)
@@ -459,6 +1850,7 @@ function applyDisciplineScore(history) {
 // Main orchestrator: approve or block a trade idea
 function approveOrBlockTrade(tradeIdea) {
     if (tradingLocked) { showToast('Trading is locked', 2200); return false; }
+    currentTradeIdea = tradeIdea || null;
     const rules = loadRules();
     const riskSettings = loadRiskSettings();
     const history = getTradeHistory();
@@ -479,20 +1871,6 @@ function approveOrBlockTrade(tradeIdea) {
 }
 
 // -------------------- Strategy --------------------
-function loadStrategy() {
-    const saved = localStorage.getItem("myStrategy") || "";
-    console.log('🔍 Loading strategy from localStorage:', saved);
-    strategyInput.value = saved;
-    startTradeBtn.disabled = saved ? false : true;
-    
-    // Show current strategy status
-    if (saved) {
-        console.log('✅ Strategy found and loaded');
-    } else {
-        console.log('❌ No strategy found in localStorage');
-    }
-}
-
 function saveStrategy() {
     console.log('🔍 saveStrategy called, text:', strategyInput.value.trim());
     const text = strategyInput.value.trim();
@@ -502,12 +1880,18 @@ function saveStrategy() {
         return;
     }
     
-    // Save to localStorage
-    localStorage.setItem("myStrategy", text);
+    // Save using safe localStorage
+    const success = safeLocalStorage.setItem("myStrategy", text);
+    if (!success) {
+        strategySavedMessage.textContent = "Error saving strategy - storage full!";
+        strategySavedMessage.style.color = "#ef4444";
+        return;
+    }
+    
     console.log('🔍 Strategy saved to localStorage:', text);
     
     // Verify it was saved
-    const verify = localStorage.getItem("myStrategy");
+    const verify = safeLocalStorage.getItem("myStrategy");
     console.log('🔍 Verification - saved strategy:', verify);
     
     // Update UI
@@ -528,8 +1912,31 @@ function saveStrategy() {
     console.log('✅ Strategy save completed successfully!');
 }
 
+function loadStrategy() {
+    const saved = safeLocalStorage.getItem("myStrategy") || "";
+    console.log('🔍 Loading strategy from localStorage:', saved);
+    strategyInput.value = saved;
+    startTradeBtn.disabled = saved ? false : true;
+    
+    // Show current strategy status
+    if (saved) {
+        console.log('✅ Strategy found and loaded');
+    } else {
+        console.log('❌ No strategy found in localStorage');
+    }
+}
+
 function startPrompts() {
     console.log('startPrompts called');
+    
+    // Validate prompt sequence before starting
+    const validation = validatePromptSequence();
+    console.log(' Prompt sequence validation:', validation);
+    
+    if (validation.criteriaDuplicates > 0 || validation.lieDuplicates > 0) {
+        console.warn(' Duplicates found, cleaning up...');
+        initializeUserTradingData(); // Re-initialize to clean duplicates
+    }
     
     // Debug: Show what's saved in localStorage
     console.log('=== DEBUG: Saved Settings ===');
@@ -538,25 +1945,20 @@ function startPrompts() {
     console.log('Strategy Rules:', JSON.parse(localStorage.getItem('strategyRules') || '{}'));
     console.log('Risk Settings:', JSON.parse(localStorage.getItem('riskSettings') || '{}'));
     console.log('Emotional Settings:', JSON.parse(localStorage.getItem('emotionalSettings') || '{}'));
-    console.log('==========================');
     
-    // Run strict pre-trade validation before starting prompts
-    if (!preTradeValidation()) {
-        console.log('❌ Pre-trade validation failed');
-        return;
+    // Hide all other sections
+    document.getElementById('homeSection').classList.add('hidden');
+    document.getElementById('journalSection').classList.add('hidden');
+    document.getElementById('analyticsSection').classList.add('hidden');
+    document.getElementById('settingsSection').classList.add('hidden');
+    
+    // Show prompt section
+    const promptSection = document.getElementById("promptSection");
+    if (promptSection) {
+        promptSection.classList.remove('hidden');
+        promptSection.classList.add('active');
     }
     
-    console.log('✅ Pre-trade validation passed, showing prompts...');
-    
-    // DO NOT block navigation - remove any blocking mechanisms
-    // window.preventAutoNav = true; // REMOVED - This was blocking navigation
-    
-    // Use consistent navigation system - hide all sections first and show prompt section
-    document.querySelectorAll('.content-section').forEach(sec => sec.classList.remove('active'));
-    try { document.getElementById("strategySection").classList.add("hidden"); } catch(e){};
-    try { journalSection.classList.add("hidden"); } catch(e){};
-    try { decisionSection.classList.add("hidden"); } catch(e){};
-    try { dashboardSection.classList.add("hidden"); } catch(e){};
     // Show prompt section both by removing legacy 'hidden' and adding phase5 'active'
     promptSection.classList.remove("hidden");
     promptSection.classList.add('active');
@@ -681,18 +2083,7 @@ function getPromptTypeName(type) {
     const names = {
         'strategy': 'Strategy Alignment',
         'criteria': 'Trading Criteria',
-        'devil': 'Devil\'s Traps',
-        'bullishStructure': 'Identified bullish or bearish HTF structure',
-        'bearishStructure': 'Identified bullish or bearish HTF structure',
-        'liquidity': 'Identified liquidity roadmap',
-        'dol': 'Identified DOL',
-        'pdArray': 'Identified PD array',
-        'ltfChoice': 'Identified LTF CHOCH',
-        'opposingLiquidity': 'Identified opposing liquidity on HTF',
-        'failureStructure': 'failure structure in orderflow',
-        'predeterminedLiquidity': 'predetermined liquidity and PD array not taken',
-        'mitigatedPD': 'PD array already mitigated',
-        'dolMitigated': 'DOL mitigated'
+        'devil': 'Devil\'s Traps'
     };
     return names[type] || type;
 }
@@ -782,72 +2173,70 @@ function buildPromptSequence() {
     
     // 0. Strategy Alignment Prompt - ALWAYS FIRST
     prompts.push({
-        text: "📋 Is this trade in line with your trading strategy?",
+        text: " Is this trade in line with your trading strategy?",
         type: "strategy",
         image: getPromptImage('strategy')
     });
     
-    // 1. Trading Criteria prompts (using saved criteria - EXACT ORDER)
+    // 1. Trading Criteria prompts (using saved criteria - EXACT ORDER, NO DUPLICATES)
     const tradingCriteria = getTradingCriteria();
+    console.log(' DEBUG: Using trading criteria from storage:', tradingCriteria);
+    console.log(' DEBUG: Total criteria count:', tradingCriteria.length);
     tradingCriteria.forEach((criterion, index) => {
         prompts.push({
-            text: "📋 Trading Criteria: " + criterion,
+            text: " Trading Criteria: " + criterion,
             type: "criteria",
             image: getPromptImage('criteria', criterion)
         });
     });
     
-    // 2. Devil's trap prompts (using saved data - EXACT ORDER)
+    // 2. Devil's trap prompts (using saved data - EXACT ORDER, NO DUPLICATES)
     const devilLies = getDevilsLiePatterns();
+    console.log(' DEBUG: Using devil\'s lies from storage:', devilLies);
+    console.log(' DEBUG: Total devil\'s lies count:', devilLies.length);
+    console.log('🔍 DEBUG: Using devil\'s lies from storage:', devilLies);
+    console.log('🔍 DEBUG: Total devil\'s lies count:', devilLies.length);
     devilLies.forEach((lie, index) => {
-        const riskLevel = lie.riskLevel || lie.risk || 'Unknown';
-        const promptText = lie.pattern + " (" + riskLevel + " risk)";
+        const promptText = typeof lie === 'string' ? lie : (lie.text || lie.pattern || lie);
         prompts.push({
             text: "🚫 Devil's Trap: " + promptText,
             type: "devil",
-            image: getPromptImage('devil', lie.pattern)
+            image: getPromptImage('devil', promptText)
         });
     });
-    
-    // 3. Strategy Rules prompts (using saved rules - EXACT ORDER)
-    const strategyRules = getStrategyRules();
-    if (Array.isArray(strategyRules)) {
-        strategyRules.forEach((rule, index) => {
-            // Min R:R prompt
-            prompts.push({
-                text: "⚖️ Strategy Rule - Min R:R for " + rule.strategyName + "? (Current: " + (rule.minRR || 'Not Set') + ")",
-                type: "minRR",
-                rule: rule,
-                inputType: "number",
-                image: getPromptImage('minRR')
-            });
-            // Allowed sessions prompt
-            prompts.push({
-                text: "⚖️ Strategy Rule - Allowed trading sessions for " + rule.strategyName + "?",
-                type: "sessions",
-                rule: rule,
-                inputType: "text",
-                image: getPromptImage('sessions')
-            });
-        });
-    } else if (strategyRules && strategyRules.strategyName) {
-        // Handle single rule object
-        // Min R:R prompt
-        prompts.push({
-            text: "⚖️ Strategy Rule - Min R:R for " + strategyRules.strategyName + "? (Current: " + (strategyRules.minRR || 'Not Set') + ")",
-            type: "minRR",
-            rule: strategyRules,
-            inputType: "number",
-            image: getPromptImage('minRR')
-        });
-        // Allowed sessions prompt
-        prompts.push({
-            text: "⚖️ Strategy Rule - Allowed trading sessions for " + strategyRules.strategyName + "?",
-            type: "sessions",
-            rule: strategyRules,
-            inputType: "text",
-            image: getPromptImage('sessions')
-        });
+
+    // 3. Strategy Rules prompts (Option B)
+    // Pull the saved rule for the currently selected strategy and ask the user to confirm
+    // the actual RR + session for THIS trade.
+    try {
+        const strategyName = String(strategyInput?.value || '').trim();
+        const savedRules = loadRules();
+        const matchedRule = Array.isArray(savedRules)
+            ? savedRules.find(r => String(r.strategyName || '').trim().toLowerCase() === strategyName.toLowerCase())
+            : null;
+
+        if (matchedRule) {
+            if (matchedRule.minRR) {
+                prompts.push({
+                    text: `⚖️ Strategy Rule - Min R:R (Required: ${matchedRule.minRR})`,
+                    type: 'minRR',
+                    inputType: 'number',
+                    rule: { minRR: matchedRule.minRR },
+                    image: getPromptImage('minRR')
+                });
+            }
+            if (Array.isArray(matchedRule.allowedSessions) && matchedRule.allowedSessions.length) {
+                prompts.push({
+                    text: `⚖️ Strategy Rule - Trading Session (Allowed: ${matchedRule.allowedSessions.join(', ')})`,
+                    type: 'sessions',
+                    inputType: 'text',
+                    rule: { allowedSessions: matchedRule.allowedSessions },
+                    image: getPromptImage('sessions')
+                });
+            }
+        }
+    } catch (e) {
+        console.error('Failed to build strategy rules prompts:', e);
     }
     
     // 4. Risk Management prompts (using saved risk settings - EXACT ORDER)
@@ -920,6 +2309,12 @@ function buildPromptSequence() {
         inputType: "letters",
         image: getPromptImage('psychologicalGrade')
     });
+    
+    console.log('✅ Built prompt sequence with', prompts.length, 'prompts');
+    console.log('📋 Trading Criteria:', tradingCriteria.length, 'items');
+    console.log('👿 Devil\'s Lies:', devilLies.length, 'items');
+    
+    return prompts;
 }
 
 function getStrategyRules() {
@@ -948,35 +2343,100 @@ function getStrategyImage() {
     return strategyImage ? strategyImage.data : placeholderImage;
 }
 
+// Function to initialize user's custom devil's lie patterns
+function initializeUserDevilsLies() {
+    console.log('🔍 Initializing user devil\'s lie patterns...');
+    
+    // Check if devil's lies already exist
+    const existingDevilsLies = JSON.parse(safeLocalStorage.getItem('devilsLies') || '[]');
+    
+    if (existingDevilsLies.length === 0) {
+        // Initialize with user's custom devil's lie patterns
+        const userDevilsLies = [
+            {
+                id: 'lie-1',
+                text: "Failed structure in order flow",
+                risk: "High",
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'lie-2', 
+                text: "Predetermined target liquidity hunt and PD array not taken",
+                risk: "Medium",
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'lie-3',
+                text: "Target PD array already mitigated", 
+                risk: "Medium",
+                createdAt: new Date().toISOString()
+            },
+            {
+                id: 'lie-4',
+                text: "DOL already taken",
+                risk: "High", 
+                createdAt: new Date().toISOString()
+            }
+        ];
+        
+        safeLocalStorage.setItem('devilsLies', JSON.stringify(userDevilsLies));
+        console.log('✅ Initialized user devil\'s lies:', userDevilsLies);
+        
+        // Update display
+        displayDevilsLieList();
+    } else {
+        console.log('📋 Devil\'s lies already exist:', existingDevilsLies);
+    }
+}
+
 function getDevilsLiePatterns() {
-    // Check for the correct key used in settings
-    const saved = JSON.parse(localStorage.getItem('devilsLies') || '[]');
+    let saved = [];
+    try {
+        saved = JSON.parse(safeLocalStorage.getItem('devilsLies') || '[]');
+    } catch (e) {
+        console.error('Error loading devils lies:', e);
+        saved = [];
+    }
+    
     if (saved.length === 0) {
-        // Return default patterns if none saved
+        // Return user's exact devil's lie patterns
         return [
-            { id: 1, pattern: "Trading during high impact news", risk: "High" },
-            { id: 2, pattern: "Chasing price after strong move", risk: "High" },
-            { id: 3, pattern: "Trading against dominant trend", risk: "Medium" },
-            { id: 4, pattern: "Over-leveraging position size", risk: "High" },
-            { id: 5, pattern: "Revenge trading after loss", risk: "High" }
+            "Failed structure in order flow",
+            "Predetermined target liquidity hunt and PD array not taken",
+            "Target PD array already mitigated",
+            "DOL already taken"
         ];
     }
-    return saved;
+    
+    // Extract text from saved objects (handle both string and object formats)
+    return saved.map(lie => {
+        if (typeof lie === 'string') return lie;
+        if (typeof lie === 'object' && lie.text) return lie.text;
+        return String(lie); // Fallback
+    });
 }
 
 function getTradingCriteria() {
-    const saved = JSON.parse(localStorage.getItem('tradingCriteria') || '[]');
+    let saved = [];
+    try {
+        saved = JSON.parse(safeLocalStorage.getItem('tradingCriteria') || '[]');
+    } catch (e) {
+        console.error('Error loading trading criteria:', e);
+        saved = [];
+    }
+    
     if (saved.length === 0) {
-        // Return default criteria if none saved
+        // Return user's exact trading criteria
         return [
-            "Market structure supports setup",
-            "Key level identified and respected",
-            "Risk/reward ratio at least 1:2",
-            "Multiple timeframe alignment",
-            "Volume confirms price action",
-            "No conflicting economic news"
+            "Identified bullish and bearish structure",
+            "Identified liquidity road map", 
+            "Identified stop hunt liquidity on HTF",
+            "Identified DOL",
+            "Identified PD array",
+            "Identified LTF CHOCH (if used)"
         ];
     }
+    
     return saved;
 }
 
@@ -997,6 +2457,7 @@ function computeConfluenceScore() {
     });
     return { score, selected };
 }
+
 function checkDevilTraps() {
     // any checked devil trap blocks trade in strict mode
     const newsEl = document.getElementById('dev_news');
@@ -1077,7 +2538,22 @@ function preTradeValidation() {
 
 // -------------------- Storage & Data Model Helpers --------------------
 function getAllTrades() {
-    return JSON.parse(localStorage.getItem('tradeJournals') || '[]');
+    // Source of truth: Journal entries
+    // - Approved trades are stored under 'approvedTrades'
+    // - Legacy analytics used 'tradeJournals' (older system)
+    // Prefer approved trades so analytics reflects what you see in the journal.
+    try {
+        const approved = JSON.parse(safeLocalStorage.getItem('approvedTrades') || '[]');
+        if (Array.isArray(approved) && approved.length) return approved;
+    } catch (e) {
+        console.error('Error loading approvedTrades for analytics:', e);
+    }
+    try {
+        return JSON.parse(localStorage.getItem('tradeJournals') || '[]');
+    } catch (e) {
+        console.error('Error loading tradeJournals for analytics:', e);
+        return [];
+    }
 }
 
 function saveTradeEntry(trade) {
@@ -1093,11 +2569,17 @@ function computeCoreMetrics(all) {
     let rSum = 0, rCount = 0;
 
     all.forEach(t => {
-        const pl = parseFloat(t.tp) - parseFloat(t.entry);
+        const pl = getTradePL(t);
         totalPL += pl;
         if (pl > 0) { wins++; grossWin += pl; }
         else if (pl < 0) { losses++; grossLoss += Math.abs(pl); }
-        if (t.rr) { rSum += t.rr; rCount++; }
+        // approx r-multiple if entry/stop/tp exist
+        const stop = parseFloat(t.stop ?? t.stopLoss ?? 0);
+        const entry = parseFloat(t.entry ?? 0);
+        if (Number.isFinite(entry) && Number.isFinite(stop) && entry !== stop && pl !== 0) {
+            const rr = Math.abs(pl / Math.abs(entry - stop));
+            if (Number.isFinite(rr)) { rSum += rr; rCount++; }
+        }
     });
 
     const winRate = totalTrades ? (wins / totalTrades) * 100 : 0;
@@ -1114,7 +2596,7 @@ function computeBehaviorMetrics(all) {
     all.forEach(t => {
         const conf = t.confidence || 0;
         const emo = t.emotionStability || 0;
-        const win = (parseFloat(t.tp) - parseFloat(t.entry)) > 0 ? 1 : 0;
+        const win = getTradePL(t) > 0 ? 1 : 0;
 
         if (!byConfidence[conf]) byConfidence[conf] = { wins: 0, total: 0 };
         byConfidence[conf].wins += win; byConfidence[conf].total++;
@@ -1138,7 +2620,7 @@ function detectBehaviorIssues(all) {
     // Overtrading: check average trades per day
     const byDay = {};
     all.forEach(t => {
-        const d = new Date(t.date).toDateString();
+        const d = new Date(getTradeDate(t) || Date.now()).toDateString();
         byDay[d] = (byDay[d] || 0) + 1;
     });
     const days = Object.keys(byDay).length;
@@ -1150,8 +2632,8 @@ function detectBehaviorIssues(all) {
     for (let i = 1; i < all.length; i++) {
         const prev = all[i-1];
         const cur = all[i];
-        const prevPL = parseFloat(prev.tp) - parseFloat(prev.entry);
-        const curPL = parseFloat(cur.tp) - parseFloat(cur.entry);
+        const prevPL = getTradePL(prev);
+        const curPL = getTradePL(cur);
         if (prevPL < 0) { afterLossTotal++; if (curPL > 0) afterLossWins++; }
     }
     if (afterLossTotal > 0) {
@@ -1162,7 +2644,7 @@ function detectBehaviorIssues(all) {
     // Impulse correlation: trades with impulse>3
     const impulseTrades = all.filter(t => (t.impulse || 0) > 3);
     if (impulseTrades.length) {
-        const wins = impulseTrades.filter(t => (parseFloat(t.tp) - parseFloat(t.entry)) > 0).length;
+        const wins = impulseTrades.filter(t => getTradePL(t) > 0).length;
         const rate = (wins / impulseTrades.length) * 100;
         if (rate < 30) alerts.push(`⚠ Impulse trades poor performance: ${rate.toFixed(0)}% win rate`);
     }
@@ -1219,6 +2701,7 @@ function showPrompt() {
             if (promptSlider) {
                 promptSlider.value = 50;
                 sliderValue.textContent = '50%';
+                sliderMovedForCurrentPrompt = false;
                 console.log('Reset slider to 50%');
             }
         }
@@ -1231,12 +2714,8 @@ function showPrompt() {
                 if (current.type === 'minRR') {
                     promptNumber.min = 0.1;
                     promptNumber.step = 0.1;
-                    promptNumber.placeholder = 'e.g., 1.5';
-                    // Pre-fill with current value if available
-                    if (current.rule && current.rule.minRR) {
-                        promptNumber.value = current.rule.minRR;
-                    }
-                    console.log('Showing number input for min R:R, current value:', current.rule?.minRR);
+                    promptNumber.placeholder = `e.g., 1.5 (must be >= ${current.rule?.minRR ?? ''})`;
+                    console.log('Showing number input for min R:R, required:', current.rule?.minRR);
                 } else if (current.type === 'stability' || current.type === 'confidence' || current.type === 'clarity') {
                     promptNumber.min = current.min || 1;
                     promptNumber.max = current.max || 5;
@@ -1257,7 +2736,7 @@ function showPrompt() {
             if (promptTextInput) {
                 promptTextInput.value = '';
                 if (current.type === 'sessions') {
-                    promptTextInput.placeholder = 'e.g., NY, LONDON, ASIAN';
+                    promptTextInput.placeholder = `e.g., NY, LONDON, ASIAN (allowed: ${(current.rule?.allowedSessions || []).join(', ')})`;
                 } else if (current.type === 'confluences') {
                     promptTextInput.placeholder = 'e.g., > 5 Criteria';
                 }
@@ -1422,6 +2901,7 @@ if (promptSlider) {
     promptSlider.addEventListener('input', function(e) {
         console.log('Slider input event triggered, value:', this.value);
         sliderValue.textContent = this.value + '%';
+        sliderMovedForCurrentPrompt = true;
         e.stopPropagation();
     });
     
@@ -1447,12 +2927,10 @@ function submitSliderAnswer() {
     // Check if this is a slider input type
     if (current.inputType === 'slider' || !current.inputType) {
         console.log('Slider value:', promptSlider ? promptSlider.value : 'NO SLIDER');
-        
-        // Check if this is an automatic submission (slider still at 50%)
-        if (promptSlider && promptSlider.value === '50') {
-            console.warn('🚨 AUTO-SUBMISSION DETECTED! Slider is still at 50%');
-            console.warn('This suggests submitSliderAnswer() was called automatically');
-            // Don't proceed with auto-submission
+
+        // Block auto-answer: require the user to move the slider for this prompt.
+        if (!sliderMovedForCurrentPrompt) {
+            console.warn('🚨 Prevented auto-answer: slider was not moved for this prompt.');
             return;
         }
         
@@ -1748,7 +3226,7 @@ function evaluateTradeDecision() {
         
         // Criteria Confluence - check if minimum confluence is met
         if (criteriaAnswers.length > 0) {
-            const minConfluence = parseInt(settings.minConfluence) || 6;
+            const minConfluence = parseInt(settings.minConfluence) || 4; // Changed from 6 to 4
             const passedCriteria = criteriaAnswers.filter(a => a.percentage >= 70);
             if (passedCriteria.length >= minConfluence) {
                 reasoningHTML += `<div class="reason-item"><span class="pass">📋 Confluence: ${passedCriteria.length}/${criteriaAnswers.length} criteria met (minimum ${minConfluence} required)</span></div>`;
@@ -1799,46 +3277,364 @@ function evaluateTradeDecision() {
     console.log('Decision displayed, waiting for user to click Continue...');
 }
 
+// Conditional Trade Input System
+let currentTradeDecision = null;
+let approvedTradeData = null;
+let rejectedTradeData = null;
+let currentTradeIdea = null;
+
+// Function to continue after decision - redirect to appropriate input section
 function continueAfterDecision() {
     console.log('=== CONTINUE BUTTON CLICKED ===');
     console.log('Current decision:', currentDecision);
     
-    // Use the stored decision instead of recalculating
-    const decision = currentDecision;
-    
-    if (!decision) {
-        console.error('❌ No decision found! This is the problem.');
+    if (!currentDecision) {
+        console.error('❌ No current decision found!');
         return;
     }
     
-    console.log('Decision valid:', decision.valid);
+    // Hide decision section
+    const decisionSection = document.getElementById('decisionSection');
+    if (decisionSection) {
+        decisionSection.classList.add('hidden');
+        decisionSection.classList.remove('active');
+    }
     
-    if (decision.valid) {
-        console.log('🚀 Navigating to journal...');
-        // Navigate to journal - use the same pattern as other navigation
-        decisionSection.classList.add("hidden");
-        decisionSection.classList.remove("active");
-        
-        // Hide other sections and show journal
-        document.querySelectorAll('.content-section').forEach(sec => sec.classList.remove('active'));
-        try { document.getElementById("strategySection").classList.add("hidden"); } catch(e){}
-        try { promptSection.classList.add("hidden"); } catch(e){}
-        try { dashboardSection.classList.add("hidden"); } catch(e){}
-        
-        // Show journal section
-        journalSection.classList.remove("hidden");
-        journalSection.classList.add('active');
-        
-        // Focus on first input field
-        setTimeout(() => {
-            const pairInput = document.getElementById('pair');
-            if (pairInput) pairInput.focus();
-        }, 300);
+    if (currentDecision.valid) {
+        // Navigate to approved trade input section
+        console.log('🚀 Navigating to approved trade input...');
+        navigateToApprovedTradeInput();
     } else {
-        console.log('🚫 Navigating to invalid journal...');
-        // Navigate to invalid trade journal section
-        decisionSection.classList.add("hidden");
-        navigateToInvalidTradeJournal();
+        // Navigate to rejected trade input section
+        console.log('🚫 Navigating to rejected trade input...');
+        navigateToRejectedTradeInput();
+    }
+}
+
+// Function to navigate to approved trade input section
+function navigateToApprovedTradeInput() {
+    console.log('🚀 DEBUG: Navigating to approved trade input section...');
+    console.log('🚀 DEBUG: Current decision data:', currentDecision);
+    
+    // Hide all sections
+    document.querySelectorAll('.content-section').forEach(sec => {
+        sec.classList.remove('active');
+    });
+    
+    // Show approved trade input section
+    const approvedSection = document.getElementById('approvedTradeInputSection');
+    if (approvedSection) {
+        approvedSection.classList.remove('hidden');
+        approvedSection.classList.add('active');
+        console.log('✅ DEBUG: Approved trade input section activated');
+        
+        // Pre-populate form with prompt data
+        prepopulateApprovedTradeForm();
+        
+        // Update navigation
+        updateNavigationForSection('approvedTradeInput');
+    } else {
+        console.error('❌ DEBUG: Approved trade input section not found!');
+    }
+}
+
+// Function to navigate to rejected trade input section
+function navigateToRejectedTradeInput() {
+    console.log('🚫 DEBUG: Navigating to rejected trade input section...');
+    console.log('🚫 DEBUG: Current decision data:', currentDecision);
+    
+    // Hide all sections
+    document.querySelectorAll('.content-section').forEach(sec => {
+        sec.classList.remove('active');
+    });
+    
+    // Show rejected trade input section
+    const rejectedSection = document.getElementById('rejectedTradeInputSection');
+    if (rejectedSection) {
+        rejectedSection.classList.remove('hidden');
+        rejectedSection.classList.add('active');
+        console.log('✅ DEBUG: Rejected trade input section activated');
+        
+        // Pre-populate form with prompt data
+        prepopulateRejectedTradeForm();
+        
+        // Update navigation
+        updateNavigationForSection('rejectedTradeInput');
+    } else {
+        console.error('❌ DEBUG: Rejected trade input section not found!');
+    }
+}
+
+// Function to update navigation for custom sections
+function updateNavigationForSection(section) {
+    // Remove active class from all nav buttons
+    document.querySelectorAll('.nav-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // No nav button should be active for these special sections
+    console.log(`Navigation updated for section: ${section}`);
+}
+
+// Function to pre-populate approved trade form with prompt data
+function prepopulateApprovedTradeForm() {
+    console.log('Pre-populating approved trade form...');
+    
+    // Get strategy from strategy input
+    const strategy = strategyInput?.value || 'Default Strategy';
+    
+    // Pre-populate strategy field if it exists
+    const approvedStrategyField = document.getElementById('approvedStrategy');
+    if (approvedStrategyField) {
+        approvedStrategyField.value = strategy;
+    }
+    
+    // Calculate confidence based on yes/no ratio
+    const confidence = currentDecision ? Math.round((currentDecision.yesCount / (currentDecision.yesCount + currentDecision.noCount)) * 10) : 5;
+    const approvedConfidenceField = document.getElementById('approvedConfidence');
+    if (approvedConfidenceField) {
+        approvedConfidenceField.value = confidence;
+    }
+    
+    // Set emotion based on confidence
+    const approvedEmotionField = document.getElementById('approvedEmotion');
+    if (approvedEmotionField) {
+        if (confidence >= 8) {
+            approvedEmotionField.value = 'CONFIDENT';
+        } else if (confidence >= 6) {
+            approvedEmotionField.value = 'NEUTRAL';
+        } else {
+            approvedEmotionField.value = 'CAUTIOUS';
+        }
+    }
+    
+    // Pre-populate notes with prompt summary
+    const approvedNotesField = document.getElementById('approvedNotes');
+    if (approvedNotesField) {
+        const notes = `Trade approved with ${currentDecision?.yesCount || 0} yes and ${currentDecision?.noCount || 0} no responses. Strategy: ${strategy}`;
+        approvedNotesField.value = notes;
+    }
+    
+    console.log('Approved trade form pre-populated');
+}
+
+// Function to pre-populate rejected trade form with prompt data
+function prepopulateRejectedTradeForm() {
+    console.log('Pre-populating rejected trade form...');
+    
+    // Get strategy from strategy input
+    const strategy = strategyInput?.value || 'Default Strategy';
+    
+    // Pre-populate rejection reason with critical issues
+    const rejectedReasonField = document.getElementById('rejectedRejectionReason');
+    if (rejectedReasonField) {
+        const rejectionReason = currentDecision?.criticalIssues?.join(', ') || 'Trade did not meet criteria';
+        rejectedReasonField.value = rejectionReason;
+    }
+    
+    // Pre-populate notes with prompt summary
+    const rejectedNotesField = document.getElementById('rejectedNotes');
+    if (rejectedNotesField) {
+        const notes = `Trade rejected with ${currentDecision?.yesCount || 0} yes and ${currentDecision?.noCount || 0} no responses. Strategy: ${strategy}. Issues: ${currentDecision?.criticalIssues?.join(', ') || 'Unknown'}`;
+        rejectedNotesField.value = notes;
+    }
+    
+    console.log('Rejected trade form pre-populated');
+}
+
+// Function to handle approved trade form submission
+function handleApprovedTradeFormSubmit(event) {
+    event.preventDefault();
+    console.log('🚀 DEBUG: Submitting approved trade form...');
+    
+    const formData = new FormData(event.target);
+    const tradeData = {
+        status: 'live',
+        entryTime: new Date().toISOString(),
+        pair: formData.get('pair'),
+        direction: formData.get('direction'),
+        entry: parseFloat(formData.get('entry')),
+        stopLoss: parseFloat(formData.get('stopLoss')),
+        takeProfit: parseFloat(formData.get('takeProfit')),
+        lotSize: parseFloat(formData.get('lotSize')),
+        confidence: parseInt(formData.get('confidence')),
+        emotion: formData.get('emotion'),
+        strategy: strategyInput?.value || 'Default Strategy',
+        notes: formData.get('notes'),
+        beforePicture: approvedTradeData?.beforePicture || null,
+        afterPicture: null,
+        completionNotes: '',
+        outcome: null,
+        exitPrice: null,
+        pl: null,
+        approvalTime: new Date().toISOString(),
+        answers: currentDecision?.answers || [],
+        yesCount: currentDecision?.yesCount || 0,
+        noCount: currentDecision?.noCount || 0
+    };
+    
+    console.log('🚀 DEBUG: Approved trade data prepared:', tradeData);
+    console.log('🚀 DEBUG: Saving to approved trades journal...');
+    
+    // Save to journal
+    addApprovedTradeToJournal(tradeData);
+    
+    // Show success message
+    const messageEl = document.getElementById('approvedTradeMessage');
+    if (messageEl) {
+        messageEl.textContent = '✅ Approved trade saved successfully!';
+        messageEl.className = 'form-message success';
+    }
+    
+    // Reset form after 2 seconds
+    setTimeout(() => {
+        event.target.reset();
+        if (messageEl) {
+            messageEl.textContent = '';
+            messageEl.className = 'form-message';
+        }
+        
+        // Navigate back to journal
+        console.log('🚀 DEBUG: Navigating back to journal after approved trade save...');
+        navigateTo('journal');
+    }, 2000);
+    
+    console.log('🚀 DEBUG: Approved trade saved successfully:', tradeData);
+}
+
+// Function to handle rejected trade form submission
+function handleRejectedTradeFormSubmit(event) {
+    event.preventDefault();
+    console.log('🚫 DEBUG: Submitting rejected trade form...');
+    
+    const formData = new FormData(event.target);
+    const tradeData = {
+        id: 'rejected-' + Date.now(),
+        status: 'unapproved',
+        entryTime: new Date().toISOString(),
+        pair: formData.get('pair'),
+        direction: formData.get('direction'),
+        entry: parseFloat(formData.get('entry')),
+        stopLoss: parseFloat(formData.get('stopLoss')),
+        takeProfit: parseFloat(formData.get('takeProfit')),
+        lotSize: 0, // Not applicable for rejected trades
+        confidence: 0, // Not applicable for rejected trades
+        emotion: 'REJECTED',
+        strategy: strategyInput?.value || 'Default Strategy',
+        notes: formData.get('notes'),
+        beforePicture: rejectedTradeData?.beforePicture || null,
+        afterPicture: null,
+        completionNotes: '',
+        outcome: null,
+        exitPrice: null,
+        pl: null,
+        rejectionReason: formData.get('rejectionReason'),
+        unapprovedTime: new Date().toISOString(),
+        answers: currentDecision?.answers || [],
+        yesCount: currentDecision?.yesCount || 0,
+        noCount: currentDecision?.noCount || 0
+    };
+    
+    console.log('🚫 DEBUG: Rejected trade data prepared:', tradeData);
+    console.log('🚫 DEBUG: Saving to unapproved trades journal...');
+    
+    // Save to journal
+    addUnapprovedTradeToJournal(tradeData);
+    
+    // Show success message
+    const messageEl = document.getElementById('rejectedTradeMessage');
+    if (messageEl) {
+        messageEl.textContent = '✅ Rejected trade saved successfully!';
+        messageEl.className = 'form-message success';
+    }
+    
+    // Reset form after 2 seconds
+    setTimeout(() => {
+        event.target.reset();
+        if (messageEl) {
+            messageEl.textContent = '';
+            messageEl.className = 'form-message';
+        }
+        
+        // Navigate back to journal
+        console.log('🚫 DEBUG: Navigating back to journal after rejected trade save...');
+        navigateTo('journal');
+    }, 2000);
+    
+    console.log('🚫 DEBUG: Rejected trade saved successfully:', tradeData);
+}
+
+// Function to handle after picture upload
+function handleAfterPictureUpload(event) {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            afterImageData = e.target.result;
+            
+            // Show preview
+            const preview = document.getElementById('afterPicturePreview');
+            if (preview) {
+                preview.innerHTML = `<img src="${e.target.result}" alt="After Trade Preview">`;
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// Function to handle approved trade image upload
+function handleApprovedTradeImageUpload(event) {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            approvedTradeData = {
+                ...approvedTradeData,
+                beforePicture: e.target.result
+            };
+            
+            // Show preview
+            const preview = document.getElementById('approvedBeforePicturePreview');
+            if (preview) {
+                preview.innerHTML = `<img src="${e.target.result}" alt="Before Trade Preview">`;
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// Function to handle rejected trade image upload
+function handleRejectedTradeImageUpload(event) {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            rejectedTradeData = {
+                ...rejectedTradeData,
+                beforePicture: e.target.result
+            };
+            
+            // Show preview
+            const preview = document.getElementById('rejectedBeforePicturePreview');
+            if (preview) {
+                preview.innerHTML = `<img src="${e.target.result}" alt="Before Trade Preview">`;
+            }
+        };
+        reader.readAsDataURL(file);
+    }
+}
+
+// Function to cancel approved trade
+function cancelApprovedTrade() {
+    if (confirm('Are you sure you want to cancel? This approved trade will not be saved.')) {
+        navigateTo('journal');
+    }
+}
+
+// Function to cancel rejected trade
+function cancelRejectedTrade() {
+    if (confirm('Are you sure you want to cancel? This rejected trade will not be saved.')) {
+        navigateTo('journal');
     }
 }
 
@@ -1859,33 +3655,39 @@ function evaluateTradeRules() {
         return { valid: false, reason: "Devil's trap triggered: " + triggeredTrap.text };
     }
     console.log('✅ Devil traps: PASSED');
-    
-    // 2. Check strategy rules (new split prompts - NO CONFLUENCES)
-    const minRRAnswer = answers.find(a => a.type === 'minRR');
-    const sessionsAnswer = answers.find(a => a.type === 'sessions');
-    
-    console.log('Strategy rule answers:', { minRRAnswer, sessionsAnswer });
-    
-    // Validate Min R:R (must be >= saved value)
-    if (minRRAnswer) {
-        const savedMinRR = rules.minRR || 1;
-        const userRR = parseFloat(minRRAnswer.answer);
-        if (userRR < savedMinRR) {
-            console.log('❌ REJECTED: Min R:R too low:', userRR, '<', savedMinRR);
-            return { valid: false, reason: `Min R:R too low (${userRR} < ${savedMinRR})` };
+
+    // 2. Strategy rules (Option B): validate user-entered RR + session against saved rule
+    try {
+        const strategyName = String(strategyInput?.value || '').trim().toLowerCase();
+        const savedRules = loadRules();
+        const matchedRule = Array.isArray(savedRules)
+            ? savedRules.find(r => String(r.strategyName || '').trim().toLowerCase() === strategyName)
+            : null;
+
+        if (matchedRule) {
+            const minRRAnswer = answers.find(a => a.type === 'minRR');
+            if (matchedRule.minRR && minRRAnswer) {
+                const userRR = parseFloat(minRRAnswer.answer);
+                if (!Number.isFinite(userRR) || userRR < matchedRule.minRR) {
+                    console.log('❌ REJECTED: Min R:R too low:', userRR, '<', matchedRule.minRR);
+                    return { valid: false, reason: `Min R:R too low (${userRR} < ${matchedRule.minRR})` };
+                }
+                console.log('✅ Min R:R: PASSED', userRR);
+            }
+
+            const sessionsAnswer = answers.find(a => a.type === 'sessions');
+            if (Array.isArray(matchedRule.allowedSessions) && matchedRule.allowedSessions.length && sessionsAnswer) {
+                const userSession = String(sessionsAnswer.answer || '').trim().toLowerCase();
+                const allowed = matchedRule.allowedSessions.map(s => String(s).trim().toLowerCase());
+                if (!userSession || !allowed.includes(userSession)) {
+                    console.log('❌ REJECTED: Session not allowed:', userSession, 'allowed:', allowed);
+                    return { valid: false, reason: `Trading session not allowed (${userSession || 'blank'})` };
+                }
+                console.log('✅ Sessions: PASSED', userSession);
+            }
         }
-        console.log('✅ Min R:R: PASSED');
-    }
-    
-    // Validate Sessions (must match saved sessions)
-    if (sessionsAnswer) {
-        const savedSessions = (rules.allowedSessions || '').toLowerCase();
-        const userSessions = sessionsAnswer.answer.toLowerCase();
-        if (savedSessions && !userSessions.includes(savedSessions.replace(/%/g, '').trim())) {
-            console.log('❌ REJECTED: Sessions not matching:', userSessions, 'expected:', savedSessions);
-            return { valid: false, reason: `Trading sessions not allowed: ${sessionsAnswer.answer}` };
-        }
-        console.log('✅ Sessions: PASSED');
+    } catch (e) {
+        console.error('Strategy rules evaluation failed:', e);
     }
     
     // 3. Check risk management (>= 70% agreement means risk check passed)
@@ -1904,9 +3706,9 @@ function evaluateTradeRules() {
     
     // 🎯 MINIMUM CONFLUENCE COUNT EXPLANATION:
     // This is the MINIMUM number of trading criteria that must pass (≥70% agreement)
-    // Example: If minConfluence = 6, you need at least 6 out of your total criteria to pass
+    // Example: If minConfluence = 4, you need at least 4 out of your total criteria to pass
     // Each criterion "passes" if you answered ≥70% on the slider
-    const minConfluence = parseInt(settings.minConfluence) || 6; // Default 6 criteria
+    const minConfluence = parseInt(settings.minConfluence) || 4; // Changed from 6 to 4 - more reasonable
     const criteriaMet = criteriaAnswers.filter(a => a.percentage >= 70).length;
     const totalCriteria = criteriaAnswers.length;
     
@@ -2301,9 +4103,10 @@ function markTradeResult(index, result) {
 function computeEquityCurve(all) {
     let cum = 0;
     const points = all.map(t => {
-        const pl = parseFloat(t.tp) - parseFloat(t.entry);
+        const pl = getTradePL(t);
         cum += pl;
-        return { date: new Date(t.date), cumPL: Number(cum.toFixed(2)) };
+        const d = getTradeDate(t);
+        return { date: new Date(d || Date.now()), cumPL: Number(cum.toFixed(2)) };
     });
     return points;
 }
@@ -2371,23 +4174,70 @@ function viewStrategy() {
 }
 
 // -------------------- Event Listeners --------------------
-window.onload = function() {
+// Initialize the app when DOM is loaded
+document.addEventListener('DOMContentLoaded', function() {
+    if (window.__appInitialized) return;
+    window.__appInitialized = true;
+
+    console.log('DOM loaded, initializing app...');
     loadAllSettings();
     loadStrategy();
-    loadDashboard();
-    displayPromptImages(); // Initialize prompt images display
+    updateDashboard();
     
-    // Add event listener for prompt image upload
+    // Initialize journal displays
+    displayLiveTrades();
+    displayCompletedTrades();
+    displayUnapprovedTrades();
+    
+    // Add event listeners for journal functionality
+    const afterPictureInput = document.getElementById('afterPicture');
+    if (afterPictureInput) {
+        afterPictureInput.addEventListener('change', handleAfterPictureUpload);
+    }
+    
+    const completedFilter = document.getElementById('completedFilter');
+    if (completedFilter) {
+        completedFilter.addEventListener('change', handleCompletedFilterChange);
+    }
+    
+    const unapprovedFilter = document.getElementById('unapprovedFilter');
+    if (unapprovedFilter) {
+        unapprovedFilter.addEventListener('change', handleUnapprovedFilterChange);
+    }
+    
+    // Add event listeners for trade input forms
+    const approvedTradeForm = document.getElementById('approvedTradeForm');
+    if (approvedTradeForm) {
+        approvedTradeForm.addEventListener('submit', handleApprovedTradeFormSubmit);
+    }
+    
+    const rejectedTradeForm = document.getElementById('rejectedTradeForm');
+    if (rejectedTradeForm) {
+        rejectedTradeForm.addEventListener('submit', handleRejectedTradeFormSubmit);
+    }
+    
+    // Add event listeners for image uploads
+    const approvedBeforePicture = document.getElementById('approvedBeforePicture');
+    if (approvedBeforePicture) {
+        approvedBeforePicture.addEventListener('change', handleApprovedTradeImageUpload);
+    }
+    
+    const rejectedBeforePicture = document.getElementById('rejectedBeforePicture');
+    if (rejectedBeforePicture) {
+        rejectedBeforePicture.addEventListener('change', handleRejectedTradeImageUpload);
+    }
+    
     const promptImageUpload = document.getElementById('promptImageUpload');
     if (promptImageUpload) {
-        promptImageUpload.addEventListener('change', function(event) {
-            handlePromptImageUploadFIXED(event);
-        });
+        promptImageUpload.addEventListener('change', handlePromptImageUploadFIXED);
     }
-};
+});
 
-const saveStrategyBtnEl = document.getElementById("saveStrategyBtn");
-if (saveStrategyBtnEl) saveStrategyBtnEl.addEventListener('click', saveStrategy);
+// Function to handle completed filter change
+function handleCompletedFilterChange() {
+    displayCompletedTrades();
+}
+
 if (startTradeBtn) startTradeBtn.addEventListener('click', function() {
     // build trade idea from UI
     const tradeIdea = {
@@ -2397,11 +4247,14 @@ if (startTradeBtn) startTradeBtn.addEventListener('click', function() {
         strategy: strategyInput.value || '',
         session: (document.getElementById('idea_session')||{}).value || '',
         time: (document.getElementById('idea_time')||{}).value || new Date().toISOString(),
-        entry: null, sl: null, tp: null,
+        entry: parseFloat((document.getElementById('idea_entry')||{}).value),
+        sl: parseFloat((document.getElementById('idea_sl')||{}).value),
+        tp: parseFloat((document.getElementById('idea_tp')||{}).value),
         lotSize: parseFloat(positionSizeInput.value) || null,
         emotion: null,
         confidence: null
     };
+    if (tradeIdea.session) localStorage.setItem('currentSession', tradeIdea.session);
     const ok = approveOrBlockTrade(tradeIdea);
     if (ok) startPrompts();
 });
@@ -2630,29 +4483,6 @@ if (saveStrategyBtn) {
     saveStrategyBtn.addEventListener('click', saveStrategy);
 }
 
-// Initialize the app when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('DOM loaded, initializing app...');
-    loadAllSettings();
-    loadStrategy();
-    updateDashboard();
-    
-    // Initialize sidebar - start collapsed
-    const sidebar = document.getElementById('sidebar');
-    if (sidebar) {
-        sidebar.classList.add('collapsed');
-    }
-    
-    // Load theme
-    const savedTheme = localStorage.getItem('theme');
-    if (savedTheme === 'dark') {
-        document.body.classList.add('dark-theme');
-    }
-    
-    // Initialize home section as active
-    navigateTo('home');
-});
-
 // -------------------- Chart Rendering --------------------
 function renderEquityChart(all) {
     try {
@@ -2736,14 +4566,33 @@ function saveEditModal() {
 
 // -------------------- Export / Import CSV --------------------
 function exportCSV() {
-    const all = getAllTrades();
+    const all = getApprovedTradesAllStatuses();
     if (!all.length) return showToast('No trades to export', 2500);
-    const headers = ['date','strategy','setupType','pair','entry','stop','tp','confluenceScore','confidence','impulse','result','rMultiple','notes'];
+    const headers = [
+        'id',
+        'status',
+        'pair',
+        'direction',
+        'strategy',
+        'entry',
+        'stopLoss',
+        'takeProfit',
+        'exitPrice',
+        'pl',
+        'outcome',
+        'lotSize',
+        'confidence',
+        'emotions',
+        'notes',
+        'entryTime',
+        'completionTime',
+        'approvalTime'
+    ];
     const rows = all.map(t => headers.map(h => {
-        let v = t[h]===undefined ? '' : t[h];
-        if (v && v instanceof Date) v = new Date(v).toISOString();
+        let v = t?.[h];
+        if (v === undefined || v === null) v = '';
         if (typeof v === 'object') v = JSON.stringify(v);
-        return '"' + String(v).replace(/"/g,'""') + '"';
+        return '"' + String(v).replace(/"/g, '""') + '"';
     }).join(','));
     const csv = [headers.join(',')].concat(rows).join('\n');
     const blob = new Blob([csv], { type: 'text/csv' });
@@ -2808,7 +4657,7 @@ function splitCsvLine(line) {
 
 // -------------------- JSON Export / Import --------------------
 function exportJSON() {
-    const all = getAllTrades();
+    const all = getApprovedTradesAllStatuses();
     if (!all.length) return showToast('No trades to export', 2500);
     const blob = new Blob([JSON.stringify(all, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -2871,7 +4720,12 @@ function attachChartTooltip() {
 const origLoadDashboard = loadDashboard;
 loadDashboard = function() {
     origLoadDashboard();
-    try { const all = getAllTrades(); renderEquityChart(all); attachChartTooltip(); renderPhase4Dashboard(); } catch(e){}
+    try {
+        const completed = getApprovedCompletedTrades();
+        renderEquityChart(completed);
+        attachChartTooltip();
+        renderPhase4Dashboard();
+    } catch(e){}
 };
 
 // -------------------- Phase 4: Advanced Analytics & Dashboard --------------------
@@ -2915,22 +4769,22 @@ function clearFilters() {
 
 // Get filtered trades
 function getFilteredTrades() {
-    let all = getAllTrades();
+    let all = getApprovedCompletedTrades();
     if (currentFilters.dateStart) {
         const ds = new Date(currentFilters.dateStart);
-        all = all.filter(t => new Date(t.date) >= ds);
+        all = all.filter(t => new Date(getTradeDate(t) || 0) >= ds);
     }
     if (currentFilters.dateEnd) {
         const de = new Date(currentFilters.dateEnd);
         de.setHours(23, 59, 59);
-        all = all.filter(t => new Date(t.date) <= de);
+        all = all.filter(t => new Date(getTradeDate(t) || 0) <= de);
     }
     if (currentFilters.strategy) all = all.filter(t => t.strategy === currentFilters.strategy);
     if (currentFilters.pair) all = all.filter(t => t.pair === currentFilters.pair);
-    if (currentFilters.emotion) all = all.filter(t => t.emotions === currentFilters.emotion);
+    if (currentFilters.emotion) all = all.filter(t => (t.emotions || t.emotion) === currentFilters.emotion);
     if (currentFilters.outcome) {
         all = all.filter(t => {
-            const pl = parseFloat(t.tp||0) - parseFloat(t.entry||0);
+            const pl = getTradePL(t);
             if (currentFilters.outcome === 'Win') return pl > 0;
             if (currentFilters.outcome === 'Loss') return pl < 0;
             if (currentFilters.outcome === 'BE') return pl === 0;
@@ -2942,31 +4796,26 @@ function getFilteredTrades() {
 
 // Populate filter dropdowns
 function populateFilterDropdowns() {
-    const all = getAllTrades();
+    const all = getApprovedCompletedTrades();
     const strategies = [...new Set(all.map(t => t.strategy).filter(Boolean))];
-    const pairs = [...new Set(all.map(t => t.pair).filter(Boolean))];
-    
-    const stratSel = document.getElementById('filter_strategy');
-    const pairSel = document.getElementById('filter_pair');
-    
+
+    const stratSel = document.getElementById('analytics_strategy');
     if (stratSel) {
+        // Preserve the "All" option and repopulate deterministically.
+        const keepFirst = stratSel.querySelector('option[value=""]');
+        stratSel.innerHTML = '';
+        if (keepFirst) stratSel.appendChild(keepFirst);
+        else {
+            const opt = document.createElement('option');
+            opt.value = '';
+            opt.textContent = 'All Strategies';
+            stratSel.appendChild(opt);
+        }
         strategies.forEach(s => {
-            if (!stratSel.querySelector(`option[value="${s}"]`)) {
-                const opt = document.createElement('option');
-                opt.value = s;
-                opt.textContent = s;
-                stratSel.appendChild(opt);
-            }
-        });
-    }
-    if (pairSel) {
-        pairs.forEach(p => {
-            if (!pairSel.querySelector(`option[value="${p}"]`)) {
-                const opt = document.createElement('option');
-                opt.value = p;
-                opt.textContent = p;
-                pairSel.appendChild(opt);
-            }
+            const opt = document.createElement('option');
+            opt.value = s;
+            opt.textContent = s;
+            stratSel.appendChild(opt);
         });
     }
 }
@@ -2982,15 +4831,17 @@ function computePhase4Analytics(trades) {
         avgRR: 0,
         pnlByEmotion: {},
         riskRewardByTrade: [],
+        equityCurve: [],
         drawdownHistory: [],
         alerts: []
     };
 
     let grossWin = 0, grossLoss = 0, rrSum = 0, rrCount = 0;
     let cumulativePL = 0;
+    let peak = 0;
 
     trades.forEach((t, idx) => {
-        const pl = parseFloat(t.tp || 0) - parseFloat(t.entry || 0);
+        const pl = getTradePL(t);
         cumulativePL += pl;
         metrics.totalPL += pl;
 
@@ -3002,21 +4853,24 @@ function computePhase4Analytics(trades) {
         if (pl < 0) grossLoss += Math.abs(pl);
 
         // RR for this trade
-        const stop = parseFloat(t.stop || t.stopLoss || 0);
-        if (t.entry && stop && pl !== 0) {
-            const rr = Math.abs(pl / Math.abs(t.entry - stop));
+        const entry = parseFloat(t.entry ?? 0);
+        const stop = parseFloat(t.stop ?? t.stopLoss ?? 0);
+        if (Number.isFinite(entry) && Number.isFinite(stop) && entry !== stop && pl !== 0) {
+            const rr = Math.abs(pl / Math.abs(entry - stop));
             metrics.riskRewardByTrade.push(rr);
             rrSum += rr;
             rrCount++;
         }
 
         // Emotion tracking
-        const emo = t.emotions || 'Unknown';
+        const emo = t.emotions || t.emotion || 'Unknown';
         if (!metrics.pnlByEmotion[emo]) metrics.pnlByEmotion[emo] = 0;
         metrics.pnlByEmotion[emo] += pl;
 
-        // Drawdown
-        metrics.drawdownHistory.push(cumulativePL);
+        // Equity / drawdown
+        metrics.equityCurve.push(cumulativePL);
+        peak = Math.max(peak, cumulativePL);
+        metrics.drawdownHistory.push(cumulativePL - peak);
     });
 
     metrics.winRate = metrics.totalTrades ? Math.round((metrics.wins / metrics.totalTrades) * 100) : 0;
@@ -3026,6 +4880,726 @@ function computePhase4Analytics(trades) {
     return metrics;
 }
 
+function renderSimpleLineChart(canvasId, series, color, fillColor) {
+    try {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!Array.isArray(series) || series.length === 0) return;
+
+        const padding = 20;
+        const w = canvas.width - padding * 2;
+        const h = canvas.height - padding * 2;
+        const min = Math.min(...series);
+        const max = Math.max(...series);
+        const range = (max - min) || 1;
+        const xs = series.map((_, i) => padding + (i / (series.length - 1 || 1)) * w);
+        const ys = series.map(v => padding + h - ((v - min) / range) * h);
+
+        // axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding, padding);
+        ctx.lineTo(padding, padding + h);
+        ctx.lineTo(padding + w, padding + h);
+        ctx.stroke();
+
+        // line
+        ctx.beginPath();
+        ctx.moveTo(xs[0], ys[0]);
+        for (let i = 1; i < xs.length; i++) ctx.lineTo(xs[i], ys[i]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // fill
+        if (fillColor) {
+            ctx.lineTo(padding + w, padding + h);
+            ctx.lineTo(padding, padding + h);
+            ctx.closePath();
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+        }
+
+        // points
+        ctx.fillStyle = '#fff';
+        for (let i = 0; i < xs.length; i++) {
+            ctx.beginPath();
+            ctx.arc(xs[i], ys[i], 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    } catch (e) {
+        console.warn('Line chart render error:', canvasId, e);
+    }
+}
+
+function renderSimpleBarChart(canvasId, labels, values, colors) {
+    try {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!Array.isArray(values) || values.length === 0) return;
+
+        const padding = 24;
+        const w = canvas.width - padding * 2;
+        const h = canvas.height - padding * 2;
+        const maxVal = Math.max(...values, 1);
+        const barW = w / values.length;
+
+        // axes
+        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(padding, padding);
+        ctx.lineTo(padding, padding + h);
+        ctx.lineTo(padding + w, padding + h);
+        ctx.stroke();
+
+        values.forEach((v, i) => {
+            const x = padding + i * barW + barW * 0.15;
+            const bw = barW * 0.7;
+            const bh = (v / maxVal) * h;
+            const y = padding + h - bh;
+            ctx.fillStyle = colors?.[i] || '#94a3b8';
+            ctx.fillRect(x, y, bw, bh);
+
+            // label
+            if (labels && labels[i]) {
+                ctx.fillStyle = 'rgba(226,232,240,0.9)';
+                ctx.font = '10px system-ui, -apple-system, Segoe UI, Roboto, Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(labels[i], x + bw / 2, padding + h + 14);
+            }
+        });
+    } catch (e) {
+        console.warn('Bar chart render error:', canvasId, e);
+    }
+}
+
+function renderSimpleDonutChart(canvasId, labelToValue) {
+    try {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const labels = Object.keys(labelToValue || {});
+        if (!labels.length) return;
+        const raw = labels.map(l => Number(labelToValue[l]) || 0);
+        // Use absolute contribution for sizing; sign will be indicated by color.
+        const sizes = raw.map(v => Math.abs(v));
+        const total = sizes.reduce((a, b) => a + b, 0) || 1;
+
+        const cx = canvas.width / 2;
+        const cy = canvas.height / 2;
+        const rOuter = Math.min(cx, cy) - 8;
+        const rInner = rOuter * 0.6;
+
+        let start = -Math.PI / 2;
+        labels.forEach((label, idx) => {
+            const value = raw[idx];
+            const slice = (sizes[idx] / total) * Math.PI * 2;
+            const end = start + slice;
+
+            let color = '#94a3b8';
+            const low = String(label).toLowerCase();
+            if (value >= 0 && (low.includes('calm') || low.includes('patient') || low.includes('confident'))) color = '#22c55e';
+            else if (value < 0 && (low.includes('angry') || low.includes('fomo') || low.includes('frustrated') || low.includes('greedy') || low.includes('anxious'))) color = '#ef4444';
+            else if (value < 0) color = '#f97316';
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.arc(cx, cy, rOuter, start, end);
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            start = end;
+        });
+
+        // hole
+        ctx.beginPath();
+        ctx.arc(cx, cy, rInner, 0, Math.PI * 2);
+        ctx.fillStyle = '#0f172a';
+        ctx.fill();
+    } catch (e) {
+        console.warn('Donut chart render error:', canvasId, e);
+    }
+}
+
+function inferSessionFromDate(dateLike) {
+    const d = dateLike ? new Date(dateLike) : new Date();
+    const h = d.getHours();
+    if (h >= 0 && h < 7) return 'Asia';
+    if (h >= 7 && h < 16) return 'London';
+    return 'New York';
+}
+
+function computeStreaks(trades) {
+    let bestWinStreak = 0;
+    let worstLossStreak = 0;
+    let curWin = 0;
+    let curLoss = 0;
+
+    trades.forEach(t => {
+        const pl = getTradePL(t);
+        if (pl > 0) {
+            curWin++;
+            curLoss = 0;
+        } else if (pl < 0) {
+            curLoss++;
+            curWin = 0;
+        } else {
+            // break-even ends both streaks
+            curWin = 0;
+            curLoss = 0;
+        }
+        bestWinStreak = Math.max(bestWinStreak, curWin);
+        worstLossStreak = Math.max(worstLossStreak, curLoss);
+    });
+
+    return { bestWinStreak, worstLossStreak };
+}
+
+function computeMaxDrawdownFromEquity(equityCurve) {
+    let peak = 0;
+    let maxDD = 0;
+    for (const v of equityCurve) {
+        peak = Math.max(peak, v);
+        maxDD = Math.min(maxDD, v - peak);
+    }
+    return maxDD; // negative or 0
+}
+
+function computeSQN(pls) {
+    // SQN = (mean / stddev) * sqrt(n)
+    const n = pls.length;
+    if (n < 2) return 0;
+    const mean = pls.reduce((a, b) => a + b, 0) / n;
+    const variance = pls.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (n - 1);
+    const sd = Math.sqrt(variance);
+    if (!sd) return 0;
+    return (mean / sd) * Math.sqrt(n);
+}
+
+function computeTiltRisk(trades) {
+    // Compares performance of trades entered soon after a loss.
+    // This is a psychology metric: "revenge/tilt" proxy.
+    // Window: 60 minutes after a losing trade completion.
+    if (!Array.isArray(trades) || trades.length < 3) return { label: '--', value: null };
+
+    const sorted = trades
+        .slice()
+        .sort((a, b) => new Date(getTradeDate(a) || 0) - new Date(getTradeDate(b) || 0));
+
+    const tilt = [];
+    const normal = [];
+    for (let i = 0; i < sorted.length; i++) {
+        const t = sorted[i];
+        const pl = getTradePL(t);
+        const d = new Date(getTradeDate(t) || 0).getTime();
+        // Find the most recent previous loss
+        let lastLossTime = null;
+        for (let j = i - 1; j >= 0; j--) {
+            if (getTradePL(sorted[j]) < 0) {
+                lastLossTime = new Date(getTradeDate(sorted[j]) || 0).getTime();
+                break;
+            }
+        }
+        if (lastLossTime && (d - lastLossTime) >= 0 && (d - lastLossTime) <= 60 * 60 * 1000) tilt.push(pl);
+        else normal.push(pl);
+    }
+
+    const avg = arr => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+    const tiltAvg = avg(tilt);
+    const normalAvg = avg(normal);
+
+    if (!tilt.length) return { label: 'No post-loss trades detected', value: 0 };
+
+    const diff = tiltAvg - normalAvg;
+    let label = 'Neutral';
+    if (diff < 0) label = 'High';
+    if (diff > 0) label = 'Low';
+    return { label: `${label} (post-loss avg ${tiltAvg.toFixed(2)} vs normal ${normalAvg.toFixed(2)})`, value: diff };
+}
+
+function computeAdvancedMetrics(trades, phase4Metrics) {
+    const pls = trades.map(t => getTradePL(t));
+    const wins = pls.filter(x => x > 0);
+    const losses = pls.filter(x => x < 0);
+
+    const avg = arr => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0);
+    const avgWin = avg(wins);
+    const avgLoss = avg(losses); // negative
+    const expectancy = avg(pls);
+    const payoff = avgLoss ? Math.abs(avgWin / avgLoss) : (avgWin ? Infinity : 0);
+
+    const streaks = computeStreaks(trades);
+    const equity = Array.isArray(phase4Metrics?.equityCurve) ? phase4Metrics.equityCurve : [];
+    const maxDD = equity.length ? computeMaxDrawdownFromEquity(equity) : 0;
+    const net = phase4Metrics?.totalPL ?? pls.reduce((a, b) => a + b, 0);
+    const recovery = maxDD ? (net / Math.abs(maxDD)) : 0;
+    const sqn = computeSQN(pls);
+    const tilt = computeTiltRisk(trades);
+
+    return {
+        expectancy,
+        payoff,
+        avgWin,
+        avgLoss,
+        bestWinStreak: streaks.bestWinStreak,
+        worstLossStreak: streaks.worstLossStreak,
+        maxDrawdown: maxDD,
+        recovery,
+        sqn,
+        tilt
+    };
+}
+
+function setText(id, value) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+}
+
+function bucketConfidence(value) {
+    const v = Number(value);
+    if (!Number.isFinite(v)) return 'Unknown';
+    if (v <= 4) return 'Low (1-4)';
+    if (v <= 7) return 'Mid (5-7)';
+    return 'High (8-10)';
+}
+
+function computeTradeRR(trade) {
+    const entry = Number(trade?.entry);
+    const stop = Number(trade?.stopLoss ?? trade?.stop);
+    const pl = getTradePL(trade);
+    if (!Number.isFinite(entry) || !Number.isFinite(stop) || entry === stop || pl === 0) return null;
+    return Math.abs(pl / Math.abs(entry - stop));
+}
+
+function bucketRR(rr) {
+    if (!Number.isFinite(rr)) return 'Unknown';
+    if (rr < 1.5) return 'RR < 1.5';
+    if (rr < 2.5) return 'RR 1.5-2.5';
+    return 'RR > 2.5';
+}
+
+function getConditionKey(trade, dimension) {
+    const d = new Date(getTradeDate(trade) || Date.now());
+    if (dimension === 'emotion') return String(trade.emotions || trade.emotion || 'Unknown');
+    if (dimension === 'session') return inferSessionFromDate(getTradeDate(trade));
+    if (dimension === 'weekday') return d.toLocaleDateString(undefined, { weekday: 'long' });
+    if (dimension === 'hour') return String(d.getHours());
+    if (dimension === 'confidence') return bucketConfidence(trade.confidence);
+    if (dimension === 'rr') return bucketRR(computeTradeRR(trade));
+    if (dimension === 'pair') return String(trade.pair || 'Unknown');
+    if (dimension === 'direction') return String(trade.direction || 'Unknown');
+    return 'Unknown';
+}
+
+function getConditionDimensionLabel(dimension) {
+    if (dimension === 'emotion') return 'Emotion';
+    if (dimension === 'session') return 'Session';
+    if (dimension === 'weekday') return 'Weekday';
+    if (dimension === 'hour') return 'Hour';
+    if (dimension === 'confidence') return 'Confidence';
+    if (dimension === 'rr') return 'R:R';
+    if (dimension === 'pair') return 'Pair';
+    if (dimension === 'direction') return 'Direction';
+    return 'Condition';
+}
+
+function getSelectedConditionDimensions() {
+    const sel = document.getElementById('condition_dimension');
+    if (!sel) return ['emotion'];
+
+    if (sel.multiple) {
+        const dims = Array.from(sel.selectedOptions || []).map(o => o.value).filter(Boolean);
+        return dims.length ? dims : ['emotion'];
+    }
+
+    return [sel.value || 'emotion'];
+}
+
+let conditionRules = [];
+
+function getConditionOperatorsForField(field) {
+    if (field === 'emotion' || field === 'session' || field === 'weekday' || field === 'confidence' || field === 'rr' || field === 'pair' || field === 'direction') {
+        return [
+            { value: 'eq', label: '=' },
+            { value: 'neq', label: '!=' },
+            { value: 'contains', label: 'contains' },
+            { value: 'ncontains', label: 'not contains' }
+        ];
+    }
+    if (field === 'hour') {
+        return [
+            { value: 'eq', label: '=' },
+            { value: 'neq', label: '!=' },
+            { value: 'gt', label: '>' },
+            { value: 'gte', label: '>=' },
+            { value: 'lt', label: '<' },
+            { value: 'lte', label: '<=' }
+        ];
+    }
+    return [
+        { value: 'eq', label: '=' },
+        { value: 'neq', label: '!=' }
+    ];
+}
+
+function getConditionFieldOptions() {
+    return [
+        { value: 'emotion', label: 'Emotion' },
+        { value: 'session', label: 'Session' },
+        { value: 'weekday', label: 'Day of Week' },
+        { value: 'hour', label: 'Hour (0-23)' },
+        { value: 'confidence', label: 'Confidence Bucket' },
+        { value: 'rr', label: 'R:R Bucket' },
+        { value: 'pair', label: 'Pair' },
+        { value: 'direction', label: 'Direction' }
+    ];
+}
+
+function normalizeForCompare(value) {
+    return String(value ?? '').trim().toLowerCase();
+}
+
+function evaluateConditionRule(trade, rule) {
+    const field = rule?.field;
+    const op = rule?.op;
+    const raw = rule?.value;
+    if (!field || !op) return true;
+
+    const tradeValue = getConditionKey(trade, field);
+
+    if (field === 'hour') {
+        const left = Number(new Date(getTradeDate(trade) || Date.now()).getHours());
+        const right = Number(raw);
+        if (!Number.isFinite(right)) return false;
+        if (op === 'eq') return left === right;
+        if (op === 'neq') return left !== right;
+        if (op === 'gt') return left > right;
+        if (op === 'gte') return left >= right;
+        if (op === 'lt') return left < right;
+        if (op === 'lte') return left <= right;
+        return true;
+    }
+
+    const left = normalizeForCompare(tradeValue);
+    const right = normalizeForCompare(raw);
+
+    if (op === 'eq') return left === right;
+    if (op === 'neq') return left !== right;
+    if (op === 'contains') return right ? left.includes(right) : true;
+    if (op === 'ncontains') return right ? !left.includes(right) : true;
+    return true;
+}
+
+function applyConditionRules(trades, rules) {
+    const active = Array.isArray(rules) ? rules.filter(r => r && r.field && r.op) : [];
+    if (!active.length) return trades;
+    return trades.filter(t => active.every(r => evaluateConditionRule(t, r)));
+}
+
+function getRuleLabel(rule) {
+    const fieldOpt = getConditionFieldOptions().find(o => o.value === rule?.field);
+    const fieldLabel = fieldOpt ? fieldOpt.label : (rule?.field || 'Field');
+    const opLabel = (getConditionOperatorsForField(rule?.field).find(o => o.value === rule?.op)?.label) || (rule?.op || '=');
+    const val = (rule?.value ?? '').toString().trim();
+    return `${fieldLabel} ${opLabel} ${val || '…'}`;
+}
+
+function getSuggestedValuesForField(field, trades) {
+    if (field === 'session') return ['Asia', 'London', 'New York'];
+    if (field === 'weekday') return ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    if (field === 'confidence') return ['Low (1-4)', 'Mid (5-7)', 'High (8-10)', 'Unknown'];
+    if (field === 'rr') return ['RR < 1.5', 'RR 1.5-2.5', 'RR > 2.5', 'Unknown'];
+    if (field === 'direction') return ['Buy', 'Sell', 'Long', 'Short'];
+    if (field === 'hour') return Array.from({ length: 24 }, (_, i) => String(i));
+
+    const uniq = new Set();
+    (Array.isArray(trades) ? trades : []).forEach(t => {
+        const key = normalizeForCompare(getConditionKey(t, field));
+        if (!key || key === 'unknown') return;
+        uniq.add(key);
+    });
+
+    const list = Array.from(uniq);
+    list.sort((a, b) => a.localeCompare(b));
+    return list;
+}
+
+function renderConditionRulesUI(baseTrades) {
+    const wrap = document.getElementById('conditionRules');
+    if (!wrap) return;
+    wrap.innerHTML = '';
+
+    if (!Array.isArray(conditionRules) || conditionRules.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'empty-state';
+        empty.textContent = 'No rules set (showing all trades).';
+        wrap.appendChild(empty);
+        return;
+    }
+
+    const fieldOptions = getConditionFieldOptions();
+
+    conditionRules.forEach((rule, idx) => {
+        const row = document.createElement('div');
+        row.className = 'condition-rule';
+
+        const fieldSel = document.createElement('select');
+        fieldSel.className = 'toolbar-input rule-field';
+        fieldOptions.forEach(opt => {
+            const o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            if (opt.value === (rule?.field || 'emotion')) o.selected = true;
+            fieldSel.appendChild(o);
+        });
+
+        const opSel = document.createElement('select');
+        opSel.className = 'toolbar-input rule-operator';
+        const ops = getConditionOperatorsForField(rule?.field || 'emotion');
+        ops.forEach(opt => {
+            const o = document.createElement('option');
+            o.value = opt.value;
+            o.textContent = opt.label;
+            if (opt.value === (rule?.op || 'eq')) o.selected = true;
+            opSel.appendChild(o);
+        });
+
+        const valueInput = document.createElement('input');
+        valueInput.className = 'toolbar-input rule-value';
+        valueInput.type = 'text';
+        valueInput.placeholder = 'Value…';
+        valueInput.value = rule?.value ?? '';
+
+        const datalistId = `condition_rule_suggestions_${idx}`;
+        valueInput.setAttribute('list', datalistId);
+
+        const dataList = document.createElement('datalist');
+        dataList.id = datalistId;
+        const suggestions = getSuggestedValuesForField(rule?.field || 'emotion', baseTrades);
+        suggestions.slice(0, 60).forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = v;
+            dataList.appendChild(opt);
+        });
+
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'btn-secondary btn-small';
+        removeBtn.type = 'button';
+        removeBtn.textContent = 'Remove';
+
+        const syncRule = () => {
+            const nextField = fieldSel.value;
+            const nextOps = getConditionOperatorsForField(nextField);
+            const currentOp = opSel.value;
+
+            // If operator is not valid for the new field, reset.
+            if (!nextOps.some(o => o.value === currentOp)) {
+                opSel.innerHTML = '';
+                nextOps.forEach(opt => {
+                    const o = document.createElement('option');
+                    o.value = opt.value;
+                    o.textContent = opt.label;
+                    opSel.appendChild(o);
+                });
+            }
+
+            conditionRules[idx] = {
+                field: fieldSel.value,
+                op: opSel.value,
+                value: valueInput.value
+            };
+        };
+
+        fieldSel.addEventListener('change', () => {
+            // rebuild operators
+            const nextOps = getConditionOperatorsForField(fieldSel.value);
+            opSel.innerHTML = '';
+            nextOps.forEach(opt => {
+                const o = document.createElement('option');
+                o.value = opt.value;
+                o.textContent = opt.label;
+                opSel.appendChild(o);
+            });
+
+            // refresh suggestions
+            dataList.innerHTML = '';
+            getSuggestedValuesForField(fieldSel.value, baseTrades).slice(0, 60).forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v;
+                dataList.appendChild(opt);
+            });
+
+            syncRule();
+            refreshConditionExplorer();
+        });
+
+        opSel.addEventListener('change', () => {
+            syncRule();
+            refreshConditionExplorer();
+        });
+
+        valueInput.addEventListener('input', () => {
+            syncRule();
+        });
+        valueInput.addEventListener('change', () => {
+            syncRule();
+            refreshConditionExplorer();
+        });
+
+        removeBtn.addEventListener('click', () => {
+            conditionRules.splice(idx, 1);
+            renderConditionRulesUI(getFilteredTrades());
+            refreshConditionExplorer();
+        });
+
+        row.appendChild(fieldSel);
+        row.appendChild(opSel);
+        row.appendChild(valueInput);
+        row.appendChild(dataList);
+        row.appendChild(removeBtn);
+        wrap.appendChild(row);
+    });
+}
+
+function renderConditionSummary(allTrades, filteredTrades) {
+    const el = document.getElementById('conditionSummary');
+    if (!el) return;
+
+    const allCount = Array.isArray(allTrades) ? allTrades.length : 0;
+    const filtCount = Array.isArray(filteredTrades) ? filteredTrades.length : 0;
+
+    const activeRules = Array.isArray(conditionRules) ? conditionRules.filter(r => r && r.field && r.op && String(r.value ?? '').trim().length) : [];
+    if (!activeRules.length) {
+        el.textContent = `Showing all ${allCount} trades (no rules).`;
+        return;
+    }
+
+    const label = activeRules.map(getRuleLabel).join(' AND ');
+    el.textContent = `Rules: ${label} — Matching ${filtCount} / ${allCount} trades.`;
+}
+
+function addConditionRule() {
+    if (!Array.isArray(conditionRules)) conditionRules = [];
+    conditionRules.push({ field: 'emotion', op: 'eq', value: '' });
+    renderConditionRulesUI(getFilteredTrades());
+}
+
+function clearConditionRules() {
+    conditionRules = [];
+    renderConditionRulesUI(getFilteredTrades());
+    refreshConditionExplorer();
+}
+
+function computeGroupStats(trades) {
+    const pls = trades.map(t => getTradePL(t));
+    const total = pls.reduce((a, b) => a + b, 0);
+    const wins = pls.filter(x => x > 0);
+    const losses = pls.filter(x => x < 0);
+    const winRate = trades.length ? Math.round((wins.length / trades.length) * 100) : 0;
+    const grossWin = wins.reduce((a, b) => a + b, 0);
+    const grossLoss = losses.reduce((a, b) => a + Math.abs(b), 0);
+    const pf = grossLoss === 0 ? (grossWin || 0) : Number((grossWin / grossLoss).toFixed(2));
+
+    // avg RR for this group
+    let rrSum = 0;
+    let rrCount = 0;
+    trades.forEach(t => {
+        const rr = computeTradeRR(t);
+        if (Number.isFinite(rr)) {
+            rrSum += rr;
+            rrCount++;
+        }
+    });
+    const avgRR = rrCount ? Number((rrSum / rrCount).toFixed(2)) : 0;
+
+    return {
+        trades: trades.length,
+        winRate,
+        totalPL: Number(total.toFixed(2)),
+        avgPL: Number((trades.length ? total / trades.length : 0).toFixed(2)),
+        profitFactor: pf,
+        avgRR
+    };
+}
+
+function renderConditionExplorerTable(trades) {
+    const dims = getSelectedConditionDimensions();
+    const groups = new Map();
+    trades.forEach(t => {
+        const key = dims
+            .map(d => `${getConditionDimensionLabel(d)}: ${getConditionKey(t, d)}`)
+            .join(' | ');
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(t);
+    });
+
+    const rows = [];
+    for (const [key, list] of groups.entries()) {
+        const stats = computeGroupStats(list);
+        rows.push({ key, ...stats });
+    }
+
+    rows.sort((a, b) => b.totalPL - a.totalPL);
+
+    const tbody = document.getElementById('conditionTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+
+    if (!rows.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="7" class="empty-state">No trades match the selected filters</td>';
+        tbody.appendChild(tr);
+        return;
+    }
+
+    rows.forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+            <td>${r.key}</td>
+            <td>${r.trades}</td>
+            <td>${r.winRate}%</td>
+            <td>${r.totalPL.toFixed(2)}</td>
+            <td>${r.avgPL.toFixed(2)}</td>
+            <td>${r.profitFactor}</td>
+            <td>${r.avgRR}</td>
+        `;
+        tbody.appendChild(tr);
+    });
+}
+
+function refreshConditionExplorer() {
+    try {
+        const base = getFilteredTrades();
+        renderConditionRulesUI(base);
+        const afterRules = applyConditionRules(base, conditionRules);
+        renderConditionSummary(base, afterRules);
+        renderConditionExplorerTable(afterRules);
+    } catch (e) {
+        console.error('Failed to refresh condition explorer:', e);
+    }
+}
+
+function renderSessionChart(trades) {
+    const buckets = { Asia: 0, London: 0, 'New York': 0 };
+    trades.forEach(t => {
+        const key = inferSessionFromDate(getTradeDate(t));
+        buckets[key] += getTradePL(t);
+    });
+    const labels = Object.keys(buckets);
+    const values = labels.map(l => Number(buckets[l].toFixed(2)));
+    const colors = values.map(v => (v >= 0 ? '#22c55e' : '#ef4444'));
+    renderSimpleBarChart('sessionChart', labels, values.map(v => Math.abs(v)), colors);
+}
+
 // Generate alerts
 function generateAlerts(metrics, trades) {
     const alerts = [];
@@ -3033,13 +5607,13 @@ function generateAlerts(metrics, trades) {
 
     // Overtrading
     const today = new Date().toDateString();
-    const todayTrades = trades.filter(t => new Date(t.date).toDateString() === today);
+    const todayTrades = trades.filter(t => new Date(getTradeDate(t) || 0).toDateString() === today);
     if (todayTrades.length > 5) alerts.push(`⚠ Overtrading: ${todayTrades.length} trades today`);
 
     // Consecutive losses
     let consecLosses = 0;
     for (let i = trades.length - 1; i >= 0; i--) {
-        const pl = parseFloat(trades[i].tp||0) - parseFloat(trades[i].entry||0);
+        const pl = getTradePL(trades[i]);
         if (pl < 0) consecLosses++;
         else break;
     }
@@ -3047,7 +5621,7 @@ function generateAlerts(metrics, trades) {
 
     // Emotional trades
     const emotionalTrades = trades.filter(t => {
-        const emo = (t.emotions || '').toLowerCase();
+        const emo = String(t.emotions || t.emotion || '').toLowerCase();
         return emo.includes('angry') || emo.includes('fomo') || emo.includes('frustrated');
     });
     if (emotionalTrades.length > Math.ceil(trades.length * 0.3)) alerts.push(`⚠ High emotional trading: ${emotionalTrades.length} emotional trades`);
@@ -3061,79 +5635,31 @@ function generateAlerts(metrics, trades) {
 
 // Chart: Risk/Reward Distribution
 function renderRRChart(metrics) {
-    const ctx = document.getElementById('rrChart');
-    if (!ctx || !metrics.riskRewardByTrade.length) return;
-    
+    if (!metrics.riskRewardByTrade.length) return;
     const bins = { low: 0, mid: 0, high: 0 };
     metrics.riskRewardByTrade.forEach(rr => {
         if (rr < 1.5) bins.low++;
         else if (rr < 2.5) bins.mid++;
         else bins.high++;
     });
-
-    if (window.rrChartInstance) window.rrChartInstance.destroy();
-    window.rrChartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: ['RR < 1.5', 'RR 1.5-2.5', 'RR > 2.5'],
-            datasets: [{
-                label: 'Trade Count',
-                data: [bins.low, bins.mid, bins.high],
-                backgroundColor: ['#ef4444', '#eab308', '#22c55e'],
-                borderRadius: 4
-            }]
-        },
-        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: false } } }
-    });
+    renderSimpleBarChart(
+        'rrChart',
+        ['<1.5', '1.5-2.5', '>2.5'],
+        [bins.low, bins.mid, bins.high],
+        ['#ef4444', '#eab308', '#22c55e']
+    );
 }
 
 // Chart: Emotion P&L
 function renderEmotionChart(metrics) {
-    const ctx = document.getElementById('emotionChart');
-    if (!ctx || !Object.keys(metrics.pnlByEmotion).length) return;
-    
-    const labels = Object.keys(metrics.pnlByEmotion);
-    const data = labels.map(k => metrics.pnlByEmotion[k]);
-    const colors = labels.map(k => {
-        if (k.toLowerCase().includes('calm')) return '#22c55e';
-        if (k.toLowerCase().includes('angry')) return '#ef4444';
-        if (k.toLowerCase().includes('fomo')) return '#f97316';
-        return '#94a3b8';
-    });
-
-    if (window.emotionChartInstance) window.emotionChartInstance.destroy();
-    window.emotionChartInstance = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{ data: data, backgroundColor: colors }]
-        },
-        options: { responsive: true, maintainAspectRatio: true }
-    });
+    if (!Object.keys(metrics.pnlByEmotion).length) return;
+    renderSimpleDonutChart('emotionChart', metrics.pnlByEmotion);
 }
 
 // Chart: Drawdown
 function renderDrawdownChart(metrics) {
-    const ctx = document.getElementById('drawdownChart');
-    if (!ctx || !metrics.drawdownHistory.length) return;
-
-    if (window.drawdownChartInstance) window.drawdownChartInstance.destroy();
-    window.drawdownChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: metrics.drawdownHistory.map((_, i) => `Trade ${i + 1}`),
-            datasets: [{
-                label: 'Cumulative P&L',
-                data: metrics.drawdownHistory,
-                borderColor: '#22c55e',
-                backgroundColor: 'rgba(34,197,94,0.1)',
-                tension: 0.4,
-                fill: true,
-                borderWidth: 2
-            }]
-        },
-        options: { responsive: true, maintainAspectRatio: true, plugins: { legend: { display: true } } }
-    });
+    if (!metrics.drawdownHistory.length) return;
+    renderSimpleLineChart('drawdownChart', metrics.drawdownHistory, '#ef4444', 'rgba(239,68,68,0.12)');
 }
 
 // Render Phase 4 dashboard
@@ -3143,31 +5669,50 @@ function renderPhase4Dashboard() {
     const metrics = computePhase4Analytics(filtered);
 
     // Update summary cards (with guards)
-    const el1 = document.getElementById('totalTrades');
+    const el1 = document.getElementById('metric_totalTrades') || document.getElementById('totalTrades');
     if (el1) el1.textContent = metrics.totalTrades;
-    const el2 = document.getElementById('winRate');
+    const elWins = document.getElementById('metric_wins');
+    if (elWins) elWins.textContent = metrics.wins;
+    const el2 = document.getElementById('metric_winRate') || document.getElementById('winRate');
     if (el2) el2.textContent = metrics.winRate + '%';
-    const el3 = document.getElementById('totalPL');
+    const el3 = document.getElementById('metric_totalPL') || document.getElementById('totalPL');
     if (el3) el3.textContent = metrics.totalPL.toFixed(2);
-    const el4 = document.getElementById('profitFactor');
+    const el4 = document.getElementById('metric_profitFactor') || document.getElementById('profitFactor');
     if (el4) el4.textContent = metrics.profitFactor;
-    const el5 = document.getElementById('avgRR');
+    const el5 = document.getElementById('metric_avgRR') || document.getElementById('avgRR');
     if (el5) el5.textContent = metrics.avgRR;
 
     // Render charts
     renderRRChart(metrics);
     renderEmotionChart(metrics);
     renderDrawdownChart(metrics);
+    renderSessionChart(filtered);
+
+    // Advanced metrics
+    const adv = computeAdvancedMetrics(filtered, metrics);
+    setText('adv_expectancy', adv.expectancy.toFixed(2));
+    setText('adv_payoff', (adv.payoff === Infinity ? '∞' : adv.payoff.toFixed(2)));
+    setText('adv_avgWin', adv.avgWin.toFixed(2));
+    setText('adv_avgLoss', adv.avgLoss.toFixed(2));
+    setText('adv_bestWinStreak', String(adv.bestWinStreak));
+    setText('adv_worstLossStreak', String(adv.worstLossStreak));
+    setText('adv_maxDrawdown', adv.maxDrawdown.toFixed(2));
+    setText('adv_recovery', adv.recovery.toFixed(2));
+    setText('adv_sqn', adv.sqn.toFixed(2));
+    setText('adv_tiltRisk', adv.tilt.label);
+
+    // Condition explorer
+    refreshConditionExplorer();
 
     // Display alerts
     const alerts = generateAlerts(metrics, filtered);
-    const alertsList = document.getElementById('alertsList');
-    if (alertsList) {
-        alertsList.innerHTML = '';
+    const insightsList = document.getElementById('analyticsInsights');
+    if (insightsList) {
+        insightsList.innerHTML = '';
         alerts.forEach(a => {
             const div = document.createElement('div');
             div.textContent = a;
-            alertsList.appendChild(div);
+            insightsList.appendChild(div);
         });
     }
 
@@ -3190,17 +5735,18 @@ function renderPhase4TradeTable(trades) {
 
     const allTrades = getAllTrades();
     trades.forEach((t, idx) => {
-        const pl = parseFloat(t.tp||0) - parseFloat(t.entry||0);
-        const stop = parseFloat(t.stop||t.stopLoss||0);
-        const rr = (t.entry && stop && pl !== 0) ? Math.abs(pl / Math.abs(t.entry - stop)).toFixed(2) : 'N/A';
+        const entry = parseFloat(t.entry ?? 0);
+        const pl = getTradePL(t);
+        const stop = parseFloat(t.stop ?? t.stopLoss ?? 0);
+        const rr = (entry && stop && pl !== 0) ? Math.abs(pl / Math.abs(entry - stop)).toFixed(2) : 'N/A';
         const outcome = pl > 0 ? 'Win' : pl < 0 ? 'Loss' : 'BE';
         const outcomeClass = pl > 0 ? 'outcome-win' : pl < 0 ? 'outcome-loss' : 'outcome-be';
-        const emo = t.emotions || '-';
+        const emo = t.emotions || t.emotion || '-';
         const emoClass = 'emotion-' + (emo||'').toLowerCase().replace(/\s+/g, '-').split('-')[0];
-        const date = new Date(t.date).toLocaleDateString();
+        const date = new Date(getTradeDate(t) || Date.now()).toLocaleDateString();
         
         // Find actual index in allTrades
-        const tradeIdx = allTrades.findIndex(tr => tr.date === t.date && tr.pair === t.pair && tr.entry === t.entry);
+        const tradeIdx = allTrades.findIndex(tr => tr.id && tr.id === t.id);
 
         const row = document.createElement('tr');
         row.className = emoClass || '';
@@ -3210,13 +5756,13 @@ function renderPhase4TradeTable(trades) {
             <td>${t.direction || '-'}</td>
             <td>${t.entry}</td>
             <td>${t.stop || t.stopLoss || '-'}</td>
-            <td>${t.tp}</td>
+            <td>${t.tp ?? t.takeProfit ?? '-'}</td>
             <td>${rr}</td>
             <td class="${outcomeClass}">${outcome}</td>
-            <td>${pl.toFixed(2)}</td>
+            <td>${Number(pl).toFixed(2)}</td>
             <td>${emo}</td>
             <td>${t.confidence || '-'}</td>
-            <td><button class="btn-action" onclick="openEditModal(${tradeIdx})">Edit</button></td>
+            <td>${tradeIdx >= 0 ? `<button class=\"btn-action\" onclick=\"openTradeDetailsModal('${t.id}')\">View</button>` : ''}</td>
         `;
         tableBody.appendChild(row);
     });
