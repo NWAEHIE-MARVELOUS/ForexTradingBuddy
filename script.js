@@ -3129,39 +3129,19 @@ function addPromptNavigationControls() {
         existingControls.remove();
     }
     
-    // Find the prompt container to add navigation to
-    const promptContainer = document.querySelector('.prompt-container') || promptSection;
+    // Find the prompt card to add navigation to (keeps controls inside the visible card)
+    const promptCard = document.querySelector('.prompt-card');
+    const promptContainer = promptCard || document.querySelector('.prompt-container') || promptSection;
     
     // Create navigation controls
     const navDiv = document.createElement('div');
     navDiv.className = 'prompt-navigation';
-    navDiv.style.cssText = `
-        display: flex !important;
-        justify-content: space-between !important;
-        align-items: center !important;
-        margin-top: 20px !important;
-        padding: 15px !important;
-        border-top: 1px solid #334155 !important;
-        background: #1e293b !important;
-        border-radius: 8px !important;
-        position: relative !important;
-        z-index: 1000 !important;
-    `;
     
     // Previous button
     const prevBtn = document.createElement('button');
     prevBtn.textContent = '← Previous';
     prevBtn.className = 'btn-secondary';
-    prevBtn.style.cssText = `
-        padding: 10px 20px !important;
-        background: #475569 !important;
-        color: white !important;
-        border: none !important;
-        border-radius: 6px !important;
-        cursor: pointer !important;
-        font-size: 14px !important;
-        transition: all 0.2s !important;
-    `;
+    prevBtn.style.cssText = '';
     prevBtn.disabled = promptIndex === 0;
     if (promptIndex === 0) {
         prevBtn.style.opacity = '0.5';
@@ -3176,28 +3156,14 @@ function addPromptNavigationControls() {
     // Prompt counter
     const counter = document.createElement('span');
     counter.textContent = `Prompt ${promptIndex + 1} of ${prompts.length}`;
-    counter.style.cssText = `
-        color: #94a3b8 !important;
-        font-weight: 600 !important;
-        font-size: 16px !important;
-        padding: 0 20px !important;
-    `;
+    counter.style.cssText = '';
     
     // Next button (only show if not last prompt)
     const nextBtn = document.createElement('button');
     if (promptIndex < prompts.length - 1) {
         nextBtn.textContent = 'Next →';
         nextBtn.className = 'btn-secondary';
-        nextBtn.style.cssText = `
-            padding: 10px 20px !important;
-            background: #22c55e !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 6px !important;
-            cursor: pointer !important;
-            font-size: 14px !important;
-            transition: all 0.2s !important;
-        `;
+        nextBtn.style.cssText = '';
         nextBtn.onclick = function(e) {
             e.preventDefault();
             e.stopPropagation();
@@ -3209,8 +3175,13 @@ function addPromptNavigationControls() {
     navDiv.appendChild(counter);
     if (nextBtn) navDiv.appendChild(nextBtn);
     
-    // Add to prompt section
-    promptContainer.appendChild(navDiv);
+    // Insert below the prompt question (preferred on mobile)
+    const questionEl = document.getElementById('promptText');
+    if (promptCard && questionEl && questionEl.parentNode === promptCard) {
+        questionEl.insertAdjacentElement('afterend', navDiv);
+    } else {
+        promptContainer.appendChild(navDiv);
+    }
     
     console.log('Navigation controls added to DOM');
 }
