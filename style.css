@@ -1032,9 +1032,38 @@ html, body {
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background-color: #0f172a;
+    background-color: #0b1220;
+    background-image: linear-gradient(180deg, #0b1220 0%, #0f172a 55%, #0b1220 100%);
+    background-attachment: fixed;
+    position: relative;
     color: #e6eef3;
     line-height: 1.5;
+}
+
+body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(1200px 800px at 50% 20%, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.55) 65%, rgba(0, 0, 0, 0.75) 100%);
+    z-index: -1;
+}
+
+.app-background {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: -2;
+    opacity: var(--app-bg-opacity, 0);
+}
+
+.app-background-media {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    filter: saturate(1.05) contrast(1.05);
 }
 
 /* ========== NAVBAR ========== */
@@ -1402,8 +1431,36 @@ body {
     right: 0;
     bottom: 0;
     overflow-y: auto;
-    background-color: #0f172a;
+    background-color: #0b1220;
+    background-image: linear-gradient(180deg, #0b1220 0%, #0f172a 55%, #0b1220 100%);
+    background-attachment: local;
     padding: 24px;
+}
+
+.main-content::before {
+    content: '';
+    position: fixed;
+    top: 60px;
+    left: 280px;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    background: radial-gradient(1200px 800px at 50% 20%, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.55) 65%, rgba(0, 0, 0, 0.75) 100%);
+    z-index: 0;
+}
+
+.main-content > * {
+    position: relative;
+    z-index: 1;
+}
+
+body.custom-bg-enabled .main-content {
+    background-image: none;
+    background-color: rgba(11, 18, 32, 0.72);
+}
+
+body.custom-bg-enabled .main-content::before {
+    background: radial-gradient(1200px 800px at 50% 20%, rgba(255, 255, 255, 0.05), rgba(0, 0, 0, 0.65) 70%, rgba(0, 0, 0, 0.82) 100%);
 }
 
 .main-content.sidebar-collapsed {
