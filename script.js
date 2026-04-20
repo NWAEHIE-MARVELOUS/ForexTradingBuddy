@@ -18,6 +18,89 @@ function persistTradeImage(tradeId, kind, dataUrl) {
     }
 }
 
+function ensureCanvasSize(canvas) {
+    try {
+        if (!canvas) return;
+        const parent = canvas.parentElement;
+        if (!parent) return;
+        const w = parent.clientWidth;
+        if (w && Math.abs((canvas.width || 0) - w) > 2) {
+            canvas.width = w;
+        }
+        if (!canvas.height) {
+            const hAttr = Number(canvas.getAttribute('height'));
+            if (Number.isFinite(hAttr) && hAttr > 0) canvas.height = hAttr;
+        }
+    } catch (e) {
+        // ignore
+    }
+}
+
+function getOutcomeLabelFromTrade(trade) {
+    const pl = getTradePL(trade);
+    if (pl > 0) return 'Win';
+    if (pl < 0) return 'Loss';
+    return 'BE';
+}
+
+function renderHomeChartsAndRecent(trades, metrics) {
+    try {
+        const all = Array.isArray(trades) ? trades.slice() : [];
+        all.sort((a, b) => new Date(getTradeDate(a) || 0) - new Date(getTradeDate(b) || 0));
+
+        // Recent P/L Trend (last 30 trades cumulative)
+        const recentForTrend = all.slice(-30);
+        let cum = 0;
+        const series = recentForTrend.map(t => {
+            cum += getTradePL(t);
+            return Number(cum.toFixed(2));
+        });
+        const eqCanvas = document.getElementById('homeEquityChart');
+        ensureCanvasSize(eqCanvas);
+        renderSimpleLineChart('homeEquityChart', series, '#22c55e', 'rgba(34,197,94,0.10)');
+
+        // Win/Loss Distribution
+        const wlCanvas = document.getElementById('homeWLChart');
+        ensureCanvasSize(wlCanvas);
+        const wins = Number(metrics?.wins ?? 0);
+        const losses = Number(metrics?.losses ?? 0);
+        const bes = Number(metrics?.breaks ?? 0);
+        renderSimpleBarChart('homeWLChart', ['Win', 'Loss', 'BE'], [wins, losses, bes], ['#22c55e', '#ef4444', '#94a3b8']);
+
+        // Recent Trades table (latest 5)
+        const tbody = document.getElementById('recentTradesBody');
+        if (tbody) {
+            const latest = all.slice(-5).reverse();
+            tbody.innerHTML = '';
+            if (!latest.length) {
+                const tr = document.createElement('tr');
+                tr.innerHTML = '<td colspan="5" class="empty-state">No trades yet</td>';
+                tbody.appendChild(tr);
+            } else {
+                latest.forEach(t => {
+                    const tr = document.createElement('tr');
+                    const pair = t?.pair ?? '—';
+                    const direction = t?.direction ?? '—';
+                    const outcome = getOutcomeLabelFromTrade(t);
+                    const confidence = (t?.confidence ?? t?.confidenceLevel ?? t?.emotion_confidence ?? '—');
+                    const d = new Date(getTradeDate(t) || 0);
+                    const dateStr = isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+                    tr.innerHTML = `
+                        <td>${pair}</td>
+                        <td>${direction}</td>
+                        <td>${outcome}</td>
+                        <td>${confidence}</td>
+                        <td>${dateStr}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to render home charts/recent trades:', e);
+    }
+}
+
 function getApprovedTradesAllStatuses() {
     try {
         const approved = JSON.parse(safeLocalStorage.getItem('approvedTrades') || '[]');
@@ -1460,6 +1543,7 @@ function loadAllSettings() {
     loadPreTradeSettings();
     loadAccountSettings();
     loadEmotionalSettings();
+    loadBackgroundSettings();
     
     // Initialize user's custom criteria and devils lies if not present
     initializeUserTradingData();
@@ -1468,6 +1552,283 @@ function loadAllSettings() {
     // Initialize criteria and devils lie displays
     displayCriteriaList();
     displayDevilsLieList();
+}
+
+// -------------------- App Background (Image/Video) --------------------
+const APP_BG_SETTINGS_KEY = 'appBackgroundSettings';
+const APP_BG_DB_NAME = 'ForexBuddyAppMedia';
+const APP_BG_DB_VERSION = 1;
+const APP_BG_STORE = 'media';
+const APP_BG_ITEM_KEY = 'background';
+
+let __appBgObjectUrl = null;
+
+function getDefaultBackgroundSettings() {
+    return {
+        enabled: false,
+        opacity: 0.35,
+        type: null
+    };
+}
+
+function safeParseJSON(value, fallback) {
+    try {
+        return JSON.parse(value);
+    } catch (e) {
+        return fallback;
+    }
+}
+
+function openAppBgDb() {
+    return new Promise((resolve, reject) => {
+        try {
+            const req = indexedDB.open(APP_BG_DB_NAME, APP_BG_DB_VERSION);
+            req.onupgradeneeded = () => {
+                const db = req.result;
+                if (!db.objectStoreNames.contains(APP_BG_STORE)) {
+                    db.createObjectStore(APP_BG_STORE);
+                }
+            };
+            req.onsuccess = () => resolve(req.result);
+            req.onerror = () => reject(req.error);
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+async function idbPut(key, value) {
+    const db = await openAppBgDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(APP_BG_STORE, 'readwrite');
+        const store = tx.objectStore(APP_BG_STORE);
+        const req = store.put(value, key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => db.close();
+        tx.onerror = () => db.close();
+    });
+}
+
+async function idbGet(key) {
+    const db = await openAppBgDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(APP_BG_STORE, 'readonly');
+        const store = tx.objectStore(APP_BG_STORE);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => db.close();
+        tx.onerror = () => db.close();
+    });
+}
+
+async function idbDelete(key) {
+    const db = await openAppBgDb();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(APP_BG_STORE, 'readwrite');
+        const store = tx.objectStore(APP_BG_STORE);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => reject(req.error);
+        tx.oncomplete = () => db.close();
+        tx.onerror = () => db.close();
+    });
+}
+
+function getBackgroundSettings() {
+    const saved = safeParseJSON(safeLocalStorage.getItem(APP_BG_SETTINGS_KEY) || 'null', null);
+    return { ...getDefaultBackgroundSettings(), ...(saved || {}) };
+}
+
+function saveBackgroundSettings(next) {
+    const merged = { ...getDefaultBackgroundSettings(), ...(next || {}) };
+    safeLocalStorage.setItem(APP_BG_SETTINGS_KEY, JSON.stringify(merged));
+    return merged;
+}
+
+function setBgStatus(text) {
+    const el = document.getElementById('bg_status');
+    if (!el) return;
+    el.textContent = text || '';
+}
+
+function setRootBgOpacity(opacity) {
+    const v = Math.max(0, Math.min(1, Number(opacity)));
+    document.documentElement.style.setProperty('--app-bg-opacity', String(v));
+}
+
+function setCustomBgEnabledClass(enabled) {
+    if (!document?.body) return;
+    document.body.classList.toggle('custom-bg-enabled', !!enabled);
+}
+
+function clearBgMediaElements() {
+    const img = document.getElementById('appBackgroundImage');
+    const vid = document.getElementById('appBackgroundVideo');
+    if (img) {
+        img.removeAttribute('src');
+        img.style.display = 'none';
+    }
+    if (vid) {
+        try { vid.pause(); } catch (e) {}
+        vid.removeAttribute('src');
+        vid.load?.();
+        vid.style.display = 'none';
+    }
+    if (__appBgObjectUrl) {
+        try { URL.revokeObjectURL(__appBgObjectUrl); } catch (e) {}
+        __appBgObjectUrl = null;
+    }
+}
+
+async function applyBackgroundFromStorage() {
+    const settings = getBackgroundSettings();
+    const enable = !!settings.enabled;
+
+    setCustomBgEnabledClass(enable);
+
+    const enableEl = document.getElementById('bg_enable');
+    if (enableEl) enableEl.checked = enable;
+
+    const opacityEl = document.getElementById('bg_opacity');
+    const opacityLabel = document.getElementById('bg_opacityLabel');
+    const opacityPct = Math.round((Number(settings.opacity) || 0.35) * 100);
+    if (opacityEl) opacityEl.value = String(opacityPct);
+    if (opacityLabel) opacityLabel.textContent = `${opacityPct}%`;
+
+    if (!enable) {
+        setRootBgOpacity(0);
+        clearBgMediaElements();
+        setBgStatus('Disabled.');
+        return;
+    }
+
+    setRootBgOpacity(Number(settings.opacity) || 0.35);
+
+    const payload = await idbGet(APP_BG_ITEM_KEY);
+    if (!payload || !payload.blob) {
+        clearBgMediaElements();
+        setBgStatus('Enabled, but no media uploaded yet.');
+        return;
+    }
+
+    clearBgMediaElements();
+    __appBgObjectUrl = URL.createObjectURL(payload.blob);
+
+    const img = document.getElementById('appBackgroundImage');
+    const vid = document.getElementById('appBackgroundVideo');
+
+    const type = payload.type || payload.blob.type || '';
+    if (type.startsWith('video/')) {
+        if (vid) {
+            vid.src = __appBgObjectUrl;
+            vid.style.display = '';
+            const p = vid.play();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
+            setBgStatus('Video background active.');
+        }
+        if (img) img.style.display = 'none';
+        return;
+    }
+
+    if (img) {
+        img.src = __appBgObjectUrl;
+        img.style.display = '';
+        setBgStatus('Image background active.');
+    }
+    if (vid) vid.style.display = 'none';
+}
+
+function loadBackgroundSettings() {
+    applyBackgroundFromStorage().catch(e => {
+        console.warn('Failed to load background settings:', e);
+        setBgStatus('Background not available in this browser.');
+        setRootBgOpacity(0);
+        clearBgMediaElements();
+    });
+}
+
+function openBackgroundMediaPicker() {
+    const input = document.getElementById('bg_mediaUpload');
+    if (!input) return;
+    input.click();
+}
+
+function toggleBackgroundEnabled() {
+    const el = document.getElementById('bg_enable');
+    const enabled = !!el?.checked;
+    const current = getBackgroundSettings();
+    saveBackgroundSettings({ ...current, enabled });
+    setCustomBgEnabledClass(enabled);
+    applyBackgroundFromStorage().catch(() => {});
+}
+
+function updateBackgroundOpacity() {
+    const el = document.getElementById('bg_opacity');
+    const label = document.getElementById('bg_opacityLabel');
+    const pct = Math.max(0, Math.min(100, Number(el?.value ?? 35)));
+    if (label) label.textContent = `${pct}%`;
+
+    const current = getBackgroundSettings();
+    const opacity = pct / 100;
+    saveBackgroundSettings({ ...current, opacity });
+    setRootBgOpacity(getBackgroundSettings().enabled ? opacity : 0);
+}
+
+async function handleBackgroundMediaUpload(event) {
+    try {
+        const file = event?.target?.files?.[0];
+        if (!file) return;
+
+        const type = file.type || '';
+        if (!type.startsWith('image/') && !type.startsWith('video/')) {
+            setBgStatus('Unsupported file type. Please upload an image or video.');
+            return;
+        }
+
+        const maxBytes = type.startsWith('video/') ? (20 * 1024 * 1024) : (8 * 1024 * 1024);
+        if (file.size > maxBytes) {
+            setBgStatus('File too large. Use a smaller image or a short video.');
+            return;
+        }
+
+        await idbPut(APP_BG_ITEM_KEY, {
+            blob: file,
+            type,
+            name: file.name,
+            size: file.size,
+            updatedAt: Date.now()
+        });
+
+        const current = getBackgroundSettings();
+        saveBackgroundSettings({ ...current, enabled: true, type: type.startsWith('video/') ? 'video' : 'image' });
+        setCustomBgEnabledClass(true);
+        setBgStatus('Saved. Applying...');
+        await applyBackgroundFromStorage();
+    } catch (e) {
+        console.error('Failed to save background media:', e);
+        setBgStatus('Failed to save background.');
+    } finally {
+        try {
+            if (event?.target) event.target.value = '';
+        } catch (e) {}
+    }
+}
+
+async function clearBackgroundMedia() {
+    try {
+        await idbDelete(APP_BG_ITEM_KEY);
+        const current = getBackgroundSettings();
+        saveBackgroundSettings({ ...current, type: null });
+        setCustomBgEnabledClass(!!getBackgroundSettings().enabled);
+        clearBgMediaElements();
+        setBgStatus('Cleared.');
+        await applyBackgroundFromStorage();
+    } catch (e) {
+        console.error('Failed to clear background media:', e);
+        setBgStatus('Failed to clear background.');
+    }
 }
 
 function initializeUserTradingData() {
@@ -4231,6 +4592,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (promptImageUpload) {
         promptImageUpload.addEventListener('change', handlePromptImageUploadFIXED);
     }
+
+    const bgUpload = document.getElementById('bg_mediaUpload');
+    if (bgUpload) {
+        bgUpload.addEventListener('change', handleBackgroundMediaUpload);
+    }
 });
 
 // Function to handle completed filter change
@@ -4398,30 +4764,77 @@ function saveTradeEntry() {
 
 function updateDashboard() {
     console.log('Updating dashboard...');
-    
-    const trades = JSON.parse(localStorage.getItem('trades') || '[]');
-    
-    // Update navbar stats
+
+    const trades = getApprovedCompletedTrades();
+    const metrics = computePhase4Analytics(trades);
+
+    // Update navbar stats (all-time, same source as analytics)
     const navTrades = document.getElementById('navTrades');
-    if (navTrades) navTrades.textContent = trades.length;
-    
-    // Calculate win rate
-    let wins = 0;
-    trades.forEach(trade => {
-        if (trade.outcome === 'Win') wins++;
-    });
-    const winRate = trades.length > 0 ? Math.round((wins / trades.length) * 100) : 0;
-    
+    if (navTrades) navTrades.textContent = String(metrics.totalTrades);
+
     const navWinRate = document.getElementById('navWinRate');
-    if (navWinRate) navWinRate.textContent = winRate + '%';
-    
+    if (navWinRate) navWinRate.textContent = metrics.winRate + '%';
+
+    const navPnL = document.getElementById('navPnL');
+    if (navPnL) navPnL.textContent = metrics.totalPL.toFixed(2);
+
+    let disciplineScore = null;
+    try {
+        const saved = safeParseJSON(localStorage.getItem('disciplineScore') || 'null', null);
+        disciplineScore = Number(saved?.score);
+        if (!Number.isFinite(disciplineScore)) {
+            disciplineScore = applyDisciplineScore(getTradeHistory().slice(-30));
+        }
+    } catch (e) {
+        try {
+            disciplineScore = applyDisciplineScore(getTradeHistory().slice(-30));
+        } catch (e2) {
+            disciplineScore = null;
+        }
+    }
+
+    const navScore = document.getElementById('navScore');
+    if (navScore) navScore.textContent = Number.isFinite(disciplineScore) ? String(Math.round(disciplineScore)) : '--';
+
     // Update dashboard cards
     const dashTotalTrades = document.getElementById('dashTotalTrades');
-    if (dashTotalTrades) dashTotalTrades.textContent = trades.length;
-    
+    if (dashTotalTrades) dashTotalTrades.textContent = String(metrics.totalTrades);
+
     const dashWinRate = document.getElementById('dashWinRate');
-    if (dashWinRate) dashWinRate.textContent = winRate + '%';
-    
+    if (dashWinRate) dashWinRate.textContent = metrics.winRate + '%';
+
+    const dashTotalPL = document.getElementById('dashTotalPL');
+    if (dashTotalPL) dashTotalPL.textContent = '$' + metrics.totalPL.toFixed(2);
+
+    const dashProfitFactor = document.getElementById('dashProfitFactor');
+    if (dashProfitFactor) dashProfitFactor.textContent = String(metrics.profitFactor);
+
+    const dashAvgRR = document.getElementById('dashAvgRR');
+    if (dashAvgRR) dashAvgRR.textContent = String(metrics.avgRR);
+
+    const dashDisciplineScore = document.getElementById('dashDisciplineScore');
+    if (dashDisciplineScore) dashDisciplineScore.textContent = Number.isFinite(disciplineScore) ? String(Math.round(disciplineScore)) : '--';
+
+    // Sidebar quick stats (use the same source as analytics)
+    const sidebarPL = document.getElementById('sidebarPL');
+    if (sidebarPL) sidebarPL.textContent = '$' + metrics.totalPL.toFixed(2);
+
+    const todayStr = new Date().toDateString();
+    const winsToday = trades.filter(t => {
+        const d = new Date(getTradeDate(t) || 0);
+        return d.toDateString() === todayStr && getTradePL(t) > 0;
+    }).length;
+    const sidebarWinsToday = document.getElementById('sidebarWinsToday');
+    if (sidebarWinsToday) sidebarWinsToday.textContent = String(winsToday);
+
+    const ddSeries = Array.isArray(metrics.drawdownHistory) ? metrics.drawdownHistory : [];
+    const maxDD = ddSeries.length ? Math.max(...ddSeries.map(v => Number(v) || 0)) : 0;
+    const sidebarDrawdown = document.getElementById('sidebarDrawdown');
+    if (sidebarDrawdown) sidebarDrawdown.textContent = maxDD.toFixed(2) + '%';
+
+    // Home charts + recent trades (use same source as analytics)
+    renderHomeChartsAndRecent(trades, metrics);
+
     console.log('Dashboard updated');
 }
 
