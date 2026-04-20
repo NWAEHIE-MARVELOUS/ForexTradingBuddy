@@ -694,6 +694,40 @@ body {
     white-space: pre-line;
 }
 
+@media (max-width: 768px) {
+    .prompt-container {
+        align-items: flex-start;
+        padding: 12px;
+        min-height: calc(100dvh - 60px);
+        min-height: calc(100svh - 60px);
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+    }
+
+    .prompt-card {
+        padding: 16px;
+        border-radius: 12px;
+        max-height: calc(100dvh - 60px - 24px);
+        max-height: calc(100svh - 60px - 24px);
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    .prompt-image {
+        height: 140px;
+        margin-bottom: 16px;
+    }
+
+    .prompt-text {
+        font-size: 16px;
+        margin-bottom: 20px;
+    }
+
+    .prompt-slider-container {
+        margin-top: 16px;
+        padding: 12px;
+    }
+}
+
 .prompt-buttons {
     display: flex;
     gap: 16px;
