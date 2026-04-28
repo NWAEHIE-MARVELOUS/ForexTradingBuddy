@@ -8,7 +8,7 @@
     <meta name="theme-color" content="#1e293b">
     <meta name="format-detection" content="telephone=no">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:;">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob: data:;">
     <title>Forex Trading Buddy — Professional Trading Dashboard</title>
     <link rel="stylesheet" href="style.css">
     <style>
@@ -383,22 +383,34 @@
         <table class="metrics-table">
             <tbody>
                 <tr>
-                    <td class="metric-label">Total Trades</td>
+                    <td class="metric-label">Total Trades <span class="help-icon" data-help-key="metric_totalTrades">?</span></td>
                     <td class="metric-value" id="metric_totalTrades">0</td>
-                    <td class="metric-label">Winning Trades</td>
+                    <td class="metric-label">Winning Trades <span class="help-icon" data-help-key="metric_wins">?</span></td>
                     <td class="metric-value" id="metric_wins">0</td>
                 </tr>
                 <tr>
-                    <td class="metric-label">Win Rate</td>
+                    <td class="metric-label">Win Rate <span class="help-icon" data-help-key="metric_winRate">?</span></td>
                     <td class="metric-value" id="metric_winRate">0%</td>
-                    <td class="metric-label">Profit Factor</td>
+                    <td class="metric-label">Profit Factor <span class="help-icon" data-help-key="metric_profitFactor">?</span></td>
                     <td class="metric-value" id="metric_profitFactor">0</td>
                 </tr>
                 <tr>
                     <td class="metric-label">Total P/L</td>
                     <td class="metric-value metric-value-pnl" id="metric_totalPL">$0</td>
-                    <td class="metric-label">Avg R:R</td>
+                    <td class="metric-label">Avg R:R <span class="help-icon" data-help-key="metric_avgRR">?</span></td>
                     <td class="metric-value" id="metric_avgRR">0</td>
+                </tr>
+                <tr>
+                    <td class="metric-label">Losing Trades <span class="help-icon" data-help-key="metric_losses">?</span></td>
+                    <td class="metric-value" id="metric_losses">0</td>
+                    <td class="metric-label">Break-even Trades <span class="help-icon" data-help-key="metric_breaks">?</span></td>
+                    <td class="metric-value" id="metric_breaks">0</td>
+                </tr>
+                <tr>
+                    <td class="metric-label">Win-Loss RR Net <span class="help-icon" data-help-key="metric_winLossRRNet">?</span></td>
+                    <td class="metric-value" id="metric_winLossRRNet">0</td>
+                    <td class="metric-label"></td>
+                    <td class="metric-value"></td>
                 </tr>
             </tbody>
         </table>
@@ -407,11 +419,11 @@
         <h3>Advanced Metrics</h3>
         <div class="advanced-metrics-grid">
             <div class="advanced-metric">
-                <div class="advanced-metric-label">Expectancy (avg P/L per trade)</div>
+                <div class="advanced-metric-label">Expectancy (avg P/L per trade) <span class="help-icon" data-help-key="adv_expectancy">?</span></div>
                 <div class="advanced-metric-value" id="adv_expectancy">0</div>
             </div>
             <div class="advanced-metric">
-                <div class="advanced-metric-label">Payoff Ratio (avg win / avg loss)</div>
+                <div class="advanced-metric-label">Payoff Ratio (avg win / avg loss) <span class="help-icon" data-help-key="adv_payoff">?</span></div>
                 <div class="advanced-metric-value" id="adv_payoff">0</div>
             </div>
             <div class="advanced-metric">
@@ -431,12 +443,28 @@
                 <div class="advanced-metric-value" id="adv_worstLossStreak">0</div>
             </div>
             <div class="advanced-metric">
-                <div class="advanced-metric-label">Max Drawdown</div>
+                <div class="advanced-metric-label">Max Drawdown <span class="help-icon" data-help-key="adv_maxDrawdown">?</span></div>
                 <div class="advanced-metric-value" id="adv_maxDrawdown">0</div>
             </div>
             <div class="advanced-metric">
-                <div class="advanced-metric-label">Recovery Factor (net / |max DD|)</div>
+                <div class="advanced-metric-label">Recovery Factor (net / |max DD|) <span class="help-icon" data-help-key="adv_recovery">?</span></div>
                 <div class="advanced-metric-value" id="adv_recovery">0</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Sharpe Ratio <span class="help-icon" data-help-key="adv_sharpe">?</span></div>
+                <div class="advanced-metric-value" id="adv_sharpe">--</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Sortino Ratio <span class="help-icon" data-help-key="adv_sortino">?</span></div>
+                <div class="advanced-metric-value" id="adv_sortino">--</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Calmar Ratio <span class="help-icon" data-help-key="adv_calmar">?</span></div>
+                <div class="advanced-metric-value" id="adv_calmar">--</div>
+            </div>
+            <div class="advanced-metric">
+                <div class="advanced-metric-label">Recovery Period (days) <span class="help-icon" data-help-key="adv_recoveryPeriod">?</span></div>
+                <div class="advanced-metric-value" id="adv_recoveryPeriod">--</div>
             </div>
             <div class="advanced-metric">
                 <div class="advanced-metric-label">SQN (System Quality Number)</div>
@@ -490,6 +518,40 @@
     <div class="card insights-card">
         <h3>💡 Key Insights</h3>
         <div id="analyticsInsights" class="insights-list"></div>
+    </div>
+
+    <div class="card metrics-table-card">
+        <h3>Monthly PnL Heatmap</h3>
+        <div class="analytics-toolbar" style="margin: 0 0 12px 0;">
+            <div class="toolbar-filters">
+                <input type="month" id="heatmap_month" class="toolbar-input">
+                <button class="btn-secondary" onclick="renderMonthlyPnlHeatmapUI()">Refresh</button>
+            </div>
+        </div>
+        <div id="pnlCalendar" class="condition-table-wrap"></div>
+    </div>
+
+    <div class="card metrics-table-card">
+        <h3>Forecasting (Bootstrap R-Multiple)</h3>
+        <div class="analytics-toolbar" style="margin: 0 0 12px 0;">
+            <div class="toolbar-filters">
+                <input type="number" id="forecast_tradesN" class="toolbar-input" min="10" max="500" step="10" value="100" placeholder="N trades">
+                <input type="number" id="forecast_drawdownX" class="toolbar-input" step="0.5" value="10" placeholder="DD (R)">
+                <input type="number" id="forecast_profitTarget" class="toolbar-input" step="0.5" value="10" placeholder="Target (R)">
+                <button class="btn-secondary" onclick="renderForecastModule()">Run</button>
+            </div>
+        </div>
+        <div class="charts-grid">
+            <div class="card chart-card chart-half">
+                <h3>Projected Equity (R)</h3>
+                <canvas id="forecastChart" height="240"></canvas>
+            </div>
+            <div class="card chart-card chart-half">
+                <h3>Return Distribution (R)</h3>
+                <canvas id="forecastDistChart" height="240"></canvas>
+            </div>
+        </div>
+        <div id="forecastSummary" class="condition-summary"></div>
     </div>
 </section>
 
@@ -671,6 +733,8 @@
                 <input type="file" id="importCsv" accept=".csv" style="display:none" onchange="importCSVFile(event)">
                 <button class="btn-secondary" onclick="document.getElementById('importJson').click()">📤 Import JSON</button>
                 <input type="file" id="importJson" accept=".json" style="display:none" onchange="importJSONFile(event)">
+                <button class="btn-secondary" onclick="document.getElementById('importXlsx').click()">📤 Import XLSX</button>
+                <input type="file" id="importXlsx" accept=".xlsx" style="display:none" onchange="importXLSXFile(event)">
                 <button class="btn-danger" onclick="if(confirm('Clear all trades? This cannot be undone!')) { clearAllTrades(); }">🗑️ Clear All Trades</button>
             </div>
         </div>
@@ -1074,6 +1138,8 @@
                 <label>Why did you want to take this trade?</label>
                 <textarea id="reflectionWhy" rows="3" class="form-input"></textarea>
             </div>
+
+            
             <div class="form-group">
                 <label>Which rule was broken?</label>
                 <input id="reflectionRule" type="text" class="form-input">
@@ -1090,6 +1156,7 @@
 <button class="fab" id="fab" onclick="quickStartTrade()" title="Quick Start Trade">➕</button>
 
 <!-- SCRIPTS -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="script.js"></script>
 </body>
 </html>
