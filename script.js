@@ -16,6 +16,283 @@ function persistTradeImage(tradeId, kind, dataUrl) {
         console.error('Failed to persist trade image:', storageKey, e);
         return null;
     }
+
+}
+
+function getMonthKey(d) {
+    const dt = d ? new Date(d) : new Date();
+    if (isNaN(dt.getTime())) return '';
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    return `${y}-${m}`;
+}
+
+function computeDailyPnlByMonth(trades, monthKey) {
+    const map = new Map();
+    (Array.isArray(trades) ? trades : []).forEach(t => {
+        const d = getTradeCompletionDate(t);
+        if (!d) return;
+        const dt = new Date(d);
+        if (isNaN(dt.getTime())) return;
+        if (getMonthKey(dt) !== monthKey) return;
+        const day = dt.getDate();
+        const prev = map.get(day) || { pl: 0, trades: 0, wins: 0, losses: 0, bes: 0 };
+        const pl = getTradePL(t);
+        prev.pl += pl;
+        prev.trades += 1;
+        if (pl > 0) prev.wins += 1;
+        else if (pl < 0) prev.losses += 1;
+        else prev.bes += 1;
+        map.set(day, prev);
+    });
+    return map;
+}
+
+function renderMonthlyPnlHeatmapUI() {
+    const el = document.getElementById('pnlCalendar');
+    const monthInput = document.getElementById('heatmap_month');
+    if (!el || !monthInput) return;
+
+    const filtered = getFilteredTrades();
+    const defaultMonth = getMonthKey(new Date());
+    if (!monthInput.value) monthInput.value = defaultMonth;
+    const monthKey = monthInput.value;
+
+    const [yStr, mStr] = monthKey.split('-');
+    const y = Number(yStr);
+    const m = Number(mStr);
+    if (!y || !m) return;
+
+    const first = new Date(y, m - 1, 1);
+    const daysInMonth = new Date(y, m, 0).getDate();
+    const startDow = (first.getDay() + 6) % 7; // Monday=0
+
+    const daily = computeDailyPnlByMonth(filtered, monthKey);
+    const allVals = Array.from(daily.values()).map(v => v.pl);
+    const maxAbs = allVals.length ? Math.max(...allVals.map(v => Math.abs(v))) : 0;
+
+    const grid = document.createElement('div');
+    grid.style.display = 'grid';
+    grid.style.gridTemplateColumns = 'repeat(7, 1fr)';
+    grid.style.gap = '6px';
+
+    const dows = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    dows.forEach(d => {
+        const h = document.createElement('div');
+        h.style.fontSize = '12px';
+        h.style.color = '#94a3b8';
+        h.style.textAlign = 'center';
+        h.textContent = d;
+        grid.appendChild(h);
+    });
+
+    for (let i = 0; i < startDow; i++) {
+        const pad = document.createElement('div');
+        grid.appendChild(pad);
+    }
+
+    for (let day = 1; day <= daysInMonth; day++) {
+        const cell = document.createElement('button');
+        cell.type = 'button';
+        cell.style.border = '1px solid rgba(148,163,184,0.2)';
+        cell.style.borderRadius = '8px';
+        cell.style.padding = '8px';
+        cell.style.background = 'rgba(51,65,85,0.2)';
+        cell.style.color = '#e2e8f0';
+        cell.style.textAlign = 'left';
+        cell.style.minHeight = '56px';
+        cell.style.cursor = 'pointer';
+
+        const v = daily.get(day);
+        const pl = v ? v.pl : 0;
+        const intensity = maxAbs ? Math.min(1, Math.abs(pl) / maxAbs) : 0;
+        const base = pl >= 0 ? `rgba(34,197,94,${0.12 + intensity * 0.45})` : `rgba(239,68,68,${0.12 + intensity * 0.45})`;
+        if (v && v.trades) cell.style.background = base;
+
+        const top = document.createElement('div');
+        top.style.fontSize = '12px';
+        top.style.opacity = '0.9';
+        top.textContent = String(day);
+
+        const bottom = document.createElement('div');
+        bottom.style.fontSize = '12px';
+        bottom.style.marginTop = '6px';
+        bottom.style.color = '#cbd5e1';
+        bottom.textContent = v && v.trades ? `${pl >= 0 ? '+' : ''}${pl.toFixed(2)} (${v.trades})` : '—';
+
+        cell.appendChild(top);
+        cell.appendChild(bottom);
+
+        if (v && v.trades) {
+            cell.title = `Day ${day}: PnL ${pl.toFixed(2)} | Trades ${v.trades} | W ${v.wins} L ${v.losses} BE ${v.bes}`;
+        }
+
+        // Click a day to jump to Journal and show that day's trades.
+        cell.addEventListener('click', () => {
+            const dt = new Date(y, m - 1, day);
+            if (isNaN(dt.getTime())) return;
+            journalDayFilterIso = dt.toISOString();
+            try {
+                navigateTo('journal');
+            } catch (e) {}
+            try {
+                const filterSel = document.getElementById('completedFilter');
+                if (filterSel) filterSel.value = 'all';
+            } catch (e) {}
+            try { displayCompletedTrades(); } catch (e) {}
+            try {
+                const completedHeader = document.querySelector('#journalSection .completed-trades-card');
+                if (completedHeader) completedHeader.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } catch (e) {}
+        });
+
+        grid.appendChild(cell);
+    }
+
+    el.innerHTML = '';
+    el.appendChild(grid);
+}
+
+function sampleWithReplacement(arr, n) {
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+        out[i] = arr[(Math.random() * arr.length) | 0];
+    }
+    return out;
+}
+
+function percentile(sorted, p) {
+    if (!sorted.length) return 0;
+    const idx = (sorted.length - 1) * p;
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    if (lo === hi) return sorted[lo];
+    const w = idx - lo;
+    return sorted[lo] * (1 - w) + sorted[hi] * w;
+}
+
+function bootstrapForecastR(realizedRs, nTrades, nPaths) {
+    const paths = [];
+    const ending = [];
+    const maxDDs = [];
+
+    for (let p = 0; p < nPaths; p++) {
+        const sample = sampleWithReplacement(realizedRs, nTrades);
+        const equity = [];
+        let cum = 0;
+        let peak = 0;
+        let maxDD = 0;
+        for (let i = 0; i < sample.length; i++) {
+            cum += sample[i];
+            equity.push(cum);
+            peak = Math.max(peak, cum);
+            maxDD = Math.min(maxDD, cum - peak);
+        }
+        paths.push(equity);
+        ending.push(cum);
+        maxDDs.push(maxDD);
+    }
+
+    ending.sort((a, b) => a - b);
+    maxDDs.sort((a, b) => a - b);
+    return {
+        paths,
+        ending,
+        maxDDs,
+        p10: percentile(ending, 0.10),
+        p50: percentile(ending, 0.50),
+        p90: percentile(ending, 0.90)
+    };
+}
+
+function renderForecastModule(auto = false) {
+    const canvas = document.getElementById('forecastChart');
+    const distCanvas = document.getElementById('forecastDistChart');
+    const summary = document.getElementById('forecastSummary');
+    if (!canvas || !distCanvas || !summary) return;
+
+    const nInput = document.getElementById('forecast_tradesN');
+    const ddInput = document.getElementById('forecast_drawdownX');
+    const targetInput = document.getElementById('forecast_profitTarget');
+
+    const nTrades = Math.max(10, Math.min(500, Number(nInput?.value || 100)));
+    const ddX = Math.max(0, Number(ddInput?.value || 10));
+    const target = Number(targetInput?.value || 10);
+
+    const trades = getFilteredTrades();
+    const realizedRs = trades
+        .map(t => getTradeRealizedR(t))
+        .filter(r => r !== null && Number.isFinite(r));
+
+    if (realizedRs.length < 15) {
+        if (!auto) showToast('Need at least 15 trades with Entry/Exit/SL for forecasting', 3500);
+        summary.textContent = 'Forecast unavailable: not enough trades with realized R.';
+        return;
+    }
+
+    const nPaths = 600;
+    const sim = bootstrapForecastR(realizedRs, nTrades, nPaths);
+
+    // Compute bands per step
+    const p10 = [];
+    const p50 = [];
+    const p90 = [];
+    for (let i = 0; i < nTrades; i++) {
+        const vals = sim.paths.map(path => path[i]).sort((a, b) => a - b);
+        p10.push(percentile(vals, 0.10));
+        p50.push(percentile(vals, 0.50));
+        p90.push(percentile(vals, 0.90));
+    }
+
+    // Render p50 line (simple), with p10/p90 lightly by drawing 3 lines
+    renderSimpleLineChart('forecastChart', p50, '#22c55e', 'rgba(34,197,94,0.10)');
+
+    // Manual overlay for p10/p90 using same canvas
+    try {
+        const ctx = canvas.getContext('2d');
+        const padding = 20;
+        const w = canvas.width - padding * 2;
+        const h = canvas.height - padding * 2;
+        const seriesAll = p10.concat(p50).concat(p90);
+        const min = Math.min(...seriesAll);
+        const max = Math.max(...seriesAll);
+        const range = (max - min) || 1;
+        const xs = p50.map((_, i) => padding + (i / (p50.length - 1 || 1)) * w);
+        const yFor = v => padding + h - ((v - min) / range) * h;
+
+        const drawLine = (series, color) => {
+            ctx.beginPath();
+            ctx.moveTo(xs[0], yFor(series[0]));
+            for (let i = 1; i < series.length; i++) ctx.lineTo(xs[i], yFor(series[i]));
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        };
+        drawLine(p10, 'rgba(148,163,184,0.9)');
+        drawLine(p90, 'rgba(148,163,184,0.9)');
+    } catch (e) {}
+
+    // Ending distribution histogram (10 bins)
+    const ends = sim.ending;
+    const minE = ends[0];
+    const maxE = ends[ends.length - 1];
+    const bins = 10;
+    const counts = new Array(bins).fill(0);
+    for (const v of ends) {
+        const idx = maxE === minE ? 0 : Math.min(bins - 1, Math.floor(((v - minE) / (maxE - minE)) * bins));
+        counts[idx] += 1;
+    }
+    const labels = counts.map((_, i) => {
+        const a = minE + (i / bins) * (maxE - minE);
+        const b = minE + ((i + 1) / bins) * (maxE - minE);
+        return `${a.toFixed(1)}..${b.toFixed(1)}`;
+    });
+    renderSimpleBarChart('forecastDistChart', labels, counts, counts.map(() => '#60a5fa'));
+
+    const probDD = ddX > 0 ? (sim.maxDDs.filter(dd => Math.abs(dd) >= ddX).length / sim.maxDDs.length) : 0;
+    const probTarget = target ? (ends.filter(v => v >= target).length / ends.length) : 0;
+
+    summary.textContent = `Expected over next ${nTrades} trades: p10 ${sim.p10.toFixed(1)}R, p50 ${sim.p50.toFixed(1)}R, p90 ${sim.p90.toFixed(1)}R | P(DD ≥ ${ddX}R): ${(probDD*100).toFixed(1)}% | P(≥ ${target}R): ${(probTarget*100).toFixed(1)}%`;
 }
 
 function ensureCanvasSize(canvas) {
@@ -120,6 +397,13 @@ function getTradeDate(trade) {
     return trade?.date || trade?.completionTime || trade?.approvalTime || trade?.entryTime || null;
 }
 
+function getTradeExitPrice(trade) {
+    // Support legacy/imported field names.
+    const raw = trade?.exitPrice ?? trade?.exit ?? trade?.close ?? trade?.closePrice ?? trade?.exit_price ?? trade?.close_price;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+}
+
 function getTradePL(trade) {
     // Option A: rely on realized P/L when available.
     // Fallbacks exist only to avoid NaNs if legacy data is present.
@@ -129,13 +413,55 @@ function getTradePL(trade) {
     }
     // Legacy fallback: if exitPrice exists, derive P/L from direction.
     const entry = Number(trade.entry);
-    const exit = Number(trade.exitPrice);
+    const exit = getTradeExitPrice(trade);
     if (Number.isFinite(entry) && Number.isFinite(exit) && trade.direction) {
         const dir = String(trade.direction).toUpperCase();
         if (dir === 'BUY') return exit - entry;
         if (dir === 'SELL') return entry - exit;
     }
     return 0;
+}
+
+function getTradeRiskPrice(trade) {
+    const entry = Number(trade?.entry);
+    const stop = Number(trade?.stopLoss ?? trade?.stop ?? trade?.sl ?? trade?.stop_loss ?? trade?.stopPrice);
+    if (!Number.isFinite(entry) || !Number.isFinite(stop) || entry === stop) return null;
+    return Math.abs(entry - stop);
+}
+
+function getTradePlannedRR(trade) {
+    // Planned RR = |TP-entry| / |entry-SL|
+    const entry = Number(trade?.entry);
+    const stop = Number(trade?.stopLoss ?? trade?.stop ?? trade?.sl ?? trade?.stop_loss ?? trade?.stopPrice);
+    const tp = Number(trade?.takeProfit ?? trade?.tp);
+    if (!Number.isFinite(entry) || !Number.isFinite(stop) || !Number.isFinite(tp) || entry === stop) return null;
+    return Math.abs(tp - entry) / Math.abs(entry - stop);
+}
+
+function getTradeRealizedR(trade) {
+    // Realized R (price-based) = signed move / risk, where signed move is derived from exitPrice.
+    const risk = getTradeRiskPrice(trade);
+    if (!risk) return null;
+    const entry = Number(trade?.entry);
+    const exit = getTradeExitPrice(trade);
+    if (!Number.isFinite(entry) || !Number.isFinite(exit) || !trade?.direction) return null;
+    const dir = String(trade.direction).toUpperCase();
+
+    // If SL was trailed to/beyond entry, the original risk is unknown and R becomes misleading.
+    // Per user request, ignore these trades for RR metrics.
+    const stop = Number(trade?.stopLoss ?? trade?.stop ?? trade?.sl ?? trade?.stop_loss ?? trade?.stopPrice);
+    if (Number.isFinite(stop)) {
+        if (dir === 'BUY' && stop >= entry) return null;
+        if (dir === 'SELL' && stop <= entry) return null;
+    }
+
+    const signedMove = dir === 'SELL' ? (entry - exit) : (exit - entry);
+    return signedMove / risk;
+}
+
+function getTradeCompletionDate(trade) {
+    // Per user request, analytics/time-based widgets should use completionTime.
+    return trade?.completionTime || trade?.date || trade?.approvalTime || trade?.entryTime || null;
 }
 
 function resolveTradeImage(trade, kind) {
@@ -452,6 +778,19 @@ function displayCompletedTrades() {
     
     const filter = document.getElementById('completedFilter')?.value || 'all';
     let completedTrades = getCompletedTrades();
+
+    // Optional day filter coming from the Analytics heatmap click.
+    if (journalDayFilterIso) {
+        const d0 = new Date(journalDayFilterIso);
+        if (!isNaN(d0.getTime())) {
+            const start = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), 0, 0, 0, 0);
+            const end = new Date(d0.getFullYear(), d0.getMonth(), d0.getDate(), 23, 59, 59, 999);
+            completedTrades = completedTrades.filter(t => {
+                const dt = new Date(getTradeCompletionDate(t) || 0);
+                return !isNaN(dt.getTime()) && dt >= start && dt <= end;
+            });
+        }
+    }
     
     // Apply filter
     if (filter !== 'all') {
@@ -474,6 +813,12 @@ function displayCompletedTrades() {
     
     completedTrades.forEach(trade => {
         const tradeCard = createTradeCard(trade, 'completed');
+        if (journalDayFilterIso) {
+            try {
+                tradeCard.style.outline = '2px solid rgba(96,165,250,0.8)';
+                tradeCard.style.outlineOffset = '2px';
+            } catch (e) {}
+        }
         container.appendChild(tradeCard);
     });
 }
@@ -1089,10 +1434,46 @@ function navigateTo(section) {
     });
 }
 
+const THEME_VARIANTS = [
+    'theme1',
+    'theme2',
+    'theme3',
+    'theme4',
+    'theme5',
+    'theme6',
+    'theme7',
+    'theme8',
+    'theme9',
+    'theme10'
+];
+
+function setThemeVariant(themeKey) {
+    const key = THEME_VARIANTS.includes(themeKey) ? themeKey : 'theme1';
+    document.body.setAttribute('data-theme', key);
+    localStorage.setItem('themeVariant', key);
+    updateThemeToggleButton();
+}
+
 function toggleTheme() {
-    document.body.classList.toggle('dark-theme');
-    const isDark = document.body.classList.contains('dark-theme');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
+    const current = document.body.getAttribute('data-theme') || localStorage.getItem('themeVariant') || 'theme1';
+    const idx = Math.max(0, THEME_VARIANTS.indexOf(current));
+    const next = THEME_VARIANTS[(idx + 1) % THEME_VARIANTS.length];
+    setThemeVariant(next);
+}
+
+function applySavedTheme() {
+    try {
+        const saved = localStorage.getItem('themeVariant') || document.body.getAttribute('data-theme') || 'theme1';
+        setThemeVariant(saved);
+    } catch (e) {}
+}
+
+function updateThemeToggleButton() {
+    const btn = document.querySelector('.theme-toggle');
+    if (!btn) return;
+    const key = document.body.getAttribute('data-theme') || localStorage.getItem('themeVariant') || 'theme1';
+    const n = Math.max(1, THEME_VARIANTS.indexOf(key) + 1);
+    btn.textContent = '🎨 ' + n;
 }
 
 function applySidebarFilters() {
@@ -1130,11 +1511,6 @@ function applyAnalyticsFilters() {
         currentFilters.strategy = strat;
 
         renderPhase4Dashboard();
-
-        // Equity curve is outside Phase 4 cards; keep it refreshed too.
-        const completed = getApprovedCompletedTrades();
-        renderEquityChart(completed);
-        attachChartTooltip();
     } catch (e) {
         console.error('Failed to apply analytics filters:', e);
     }
@@ -1152,19 +1528,110 @@ function downloadData(format) {
     }
 }
 
+function clearAllTrades() {
+    try {
+        safeLocalStorage.removeItem('approvedTrades');
+        safeLocalStorage.removeItem('tradeJournals');
+        safeLocalStorage.removeItem('trades');
+        safeLocalStorage.removeItem('disciplineScore');
+        updateDashboard();
+        updateTradeTable();
+        try { renderPhase4Dashboard(); } catch (e) {}
+        showToast('All trades cleared', 2200);
+    } catch (e) {
+        console.error('Failed to clear trades:', e);
+        showToast('Failed to clear trades', 2500);
+    }
+}
+
 function quickStartTrade() {
     console.log('Quick start trade');
     // Implementation needed
 }
 
 function saveLogoSettings() {
-    console.log('Saving logo settings');
-    // Implementation needed
+    try {
+        const url = (document.getElementById('customLogoUrl')?.value || '').trim();
+        const title = (document.getElementById('customAppTitle')?.value || '').trim();
+        const saved = safeParseJSON(safeLocalStorage.getItem('appBranding') || 'null', null) || {};
+        const next = {
+            ...saved,
+            logoUrl: url || saved.logoUrl || null,
+            appTitle: title || saved.appTitle || 'ForexBuddy'
+        };
+        safeLocalStorage.setItem('appBranding', JSON.stringify(next));
+        applyBrandingFromStorage();
+        showToast('Branding saved', 2000);
+    } catch (e) {
+        console.error('Failed to save branding:', e);
+        showToast('Failed to save branding', 2500);
+    }
 }
 
 function handleLogoUpload(event) {
-    console.log('Handling logo upload');
-    // Implementation needed
+    try {
+        const file = event?.target?.files?.[0];
+        if (!file) return;
+        if (!(file.type || '').startsWith('image/')) {
+            showToast('Please upload an image file', 2500);
+            return;
+        }
+
+        const maxBytes = 2 * 1024 * 1024;
+        if (file.size > maxBytes) {
+            showToast('Logo too large (max 2MB)', 2500);
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = String(reader.result || '');
+            const current = safeParseJSON(safeLocalStorage.getItem('appBranding') || 'null', null) || {};
+            const next = { ...current, logoDataUrl: dataUrl, logoUrl: null };
+            safeLocalStorage.setItem('appBranding', JSON.stringify(next));
+            const urlInput = document.getElementById('customLogoUrl');
+            if (urlInput) urlInput.value = '';
+            applyBrandingFromStorage();
+            showToast('Logo updated', 2000);
+        };
+        reader.readAsDataURL(file);
+    } catch (e) {
+        console.error('Logo upload failed:', e);
+        showToast('Logo upload failed', 2500);
+    } finally {
+        try { if (event?.target) event.target.value = ''; } catch (e) {}
+    }
+}
+
+function applyBrandingFromStorage() {
+    const brand = safeParseJSON(safeLocalStorage.getItem('appBranding') || 'null', null) || {};
+    const logoSrc = brand.logoDataUrl || brand.logoUrl || null;
+    const title = (brand.appTitle || 'ForexBuddy').trim();
+
+    const logoImg = document.getElementById('navbarLogo');
+    if (logoImg && logoSrc) {
+        logoImg.src = logoSrc;
+    }
+
+    const titleEl = document.querySelector('.navbar-title');
+    if (titleEl) titleEl.textContent = title || 'ForexBuddy';
+    if (title) document.title = title;
+
+    const urlInput = document.getElementById('customLogoUrl');
+    if (urlInput && brand.logoUrl) urlInput.value = brand.logoUrl;
+    const titleInput = document.getElementById('customAppTitle');
+    if (titleInput && title) titleInput.value = title;
+
+    // Update favicon as well (tab icon / PWA-like feel)
+    if (logoSrc) {
+        let link = document.querySelector('link[rel~="icon"]');
+        if (!link) {
+            link = document.createElement('link');
+            link.rel = 'icon';
+            document.head.appendChild(link);
+        }
+        link.href = logoSrc;
+    }
 }
 
 function savePromptImageForType() {
@@ -1438,13 +1905,57 @@ function quickStartTrade() {
 }
 
 function saveLogoSettings() {
-    console.log('Saving logo settings');
-    // Implementation needed
+    try {
+        const url = (document.getElementById('customLogoUrl')?.value || '').trim();
+        const title = (document.getElementById('customAppTitle')?.value || '').trim();
+        const saved = safeParseJSON(safeLocalStorage.getItem('appBranding') || 'null', null) || {};
+        const next = {
+            ...saved,
+            logoUrl: url || saved.logoUrl || null,
+            appTitle: title || saved.appTitle || 'ForexBuddy'
+        };
+        safeLocalStorage.setItem('appBranding', JSON.stringify(next));
+        applyBrandingFromStorage();
+        showToast('Branding saved', 2000);
+    } catch (e) {
+        console.error('Failed to save branding:', e);
+        showToast('Failed to save branding', 2500);
+    }
 }
 
 function handleLogoUpload(event) {
-    console.log('Handling logo upload', event);
-    // Implementation needed
+    try {
+        const file = event?.target?.files?.[0];
+        if (!file) return;
+        if (!(file.type || '').startsWith('image/')) {
+            showToast('Please upload an image file', 2500);
+            return;
+        }
+
+        const maxBytes = 2 * 1024 * 1024;
+        if (file.size > maxBytes) {
+            showToast('Logo too large (max 2MB)', 2500);
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = () => {
+            const dataUrl = String(reader.result || '');
+            const current = safeParseJSON(safeLocalStorage.getItem('appBranding') || 'null', null) || {};
+            const next = { ...current, logoDataUrl: dataUrl, logoUrl: null };
+            safeLocalStorage.setItem('appBranding', JSON.stringify(next));
+            const urlInput = document.getElementById('customLogoUrl');
+            if (urlInput) urlInput.value = '';
+            applyBrandingFromStorage();
+            showToast('Logo updated', 2000);
+        };
+        reader.readAsDataURL(file);
+    } catch (e) {
+        console.error('Logo upload failed:', e);
+        showToast('Logo upload failed', 2500);
+    } finally {
+        try { if (event?.target) event.target.value = ''; } catch (e) {}
+    }
 }
 
 function savePromptImageForType() {
@@ -1723,9 +2234,29 @@ async function applyBackgroundFromStorage() {
     if (type.startsWith('video/')) {
         if (vid) {
             vid.src = __appBgObjectUrl;
+            vid.muted = true;
+            vid.autoplay = true;
+            vid.loop = true;
+            vid.playsInline = true;
+            try { vid.setAttribute('playsinline', ''); } catch (e) {}
+            try { vid.setAttribute('muted', ''); } catch (e) {}
+            try { vid.load(); } catch (e) {}
             vid.style.display = '';
-            const p = vid.play();
-            if (p && typeof p.catch === 'function') p.catch(() => {});
+            const tryPlay = () => {
+                try {
+                    const p = vid.play();
+                    if (p && typeof p.catch === 'function') {
+                        p.catch(() => {
+                            // Mobile browsers may block autoplay; retry after user interaction.
+                            window.__bgVideoNeedsPlay = true;
+                        });
+                    }
+                } catch (e) {
+                    window.__bgVideoNeedsPlay = true;
+                }
+            };
+            vid.oncanplay = () => tryPlay();
+            tryPlay();
             setBgStatus('Video background active.');
         }
         if (img) img.style.display = 'none';
@@ -4512,6 +5043,8 @@ document.addEventListener('DOMContentLoaded', function() {
     window.__appInitialized = true;
 
     console.log('DOM loaded, initializing app...');
+    applySavedTheme();
+    try { applyBrandingFromStorage(); } catch (e) {}
     loadAllSettings();
     loadStrategy();
     updateDashboard();
@@ -4568,6 +5101,27 @@ document.addEventListener('DOMContentLoaded', function() {
     if (bgUpload) {
         bgUpload.addEventListener('change', handleBackgroundMediaUpload);
     }
+
+    const attemptBgVideoPlay = () => {
+        if (!window.__bgVideoNeedsPlay) return;
+        const vid = document.getElementById('appBackgroundVideo');
+        if (!vid) return;
+        try {
+            const p = vid.play();
+            if (p && typeof p.catch === 'function') p.catch(() => {});
+            window.__bgVideoNeedsPlay = false;
+        } catch (e) {}
+    };
+
+    const onFirstInteract = () => {
+        attemptBgVideoPlay();
+        window.removeEventListener('pointerdown', onFirstInteract, true);
+        window.removeEventListener('touchstart', onFirstInteract, true);
+        window.removeEventListener('keydown', onFirstInteract, true);
+    };
+    window.addEventListener('pointerdown', onFirstInteract, true);
+    window.addEventListener('touchstart', onFirstInteract, true);
+    window.addEventListener('keydown', onFirstInteract, true);
 });
 
 // Function to handle completed filter change
@@ -4985,6 +5539,346 @@ function exportCSV() {
     showToast('CSV export started', 1400);
 }
 
+// Backwards-compatible handlers referenced by inline HTML attributes
+function importCSVFile(e) { return importCsvFile(e); }
+function importJSONFile(e) { return importJsonFile(e); }
+function importXLSXFile(e) { return importXlsxFile(e); }
+
+function toIsoOrNull(v) {
+    if (v === undefined || v === null || v === '') return null;
+    const d = new Date(v);
+    return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function toNumberOrNull(v) {
+    if (v === undefined || v === null || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+}
+
+function ensureTradeId(t) {
+    if (t && (t.id || t.id === 0)) return String(t.id);
+    return 't_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+function normalizeImportedTrade(raw) {
+    const t = raw && typeof raw === 'object' ? { ...raw } : {};
+
+    const normMap = {};
+    try {
+        Object.keys(t).forEach(k => {
+            const nk = normalizeXlsxHeader(k);
+            if (!nk) return;
+            if (normMap[nk] === undefined) normMap[nk] = t[k];
+        });
+    } catch (e) {}
+
+    // Handle legacy key names from older CSV/imports
+    if (t.stop !== undefined && t.stopLoss === undefined) t.stopLoss = t.stop;
+    if (t.tp !== undefined && t.takeProfit === undefined) t.takeProfit = t.tp;
+    if (t.result !== undefined && t.outcome === undefined) t.outcome = t.result;
+
+    // Broker CSV/XLSX style headers
+    if (t.Symbol !== undefined && t.pair === undefined) t.pair = t.Symbol;
+    if (t.symbol !== undefined && t.pair === undefined) t.pair = t.symbol;
+    if (t.Pair !== undefined && t.pair === undefined) t.pair = t.Pair;
+
+    if (t['Entry Price'] !== undefined && t.entry === undefined) t.entry = t['Entry Price'];
+    if (t['Exit Price'] !== undefined && t.exitPrice === undefined) t.exitPrice = t['Exit Price'];
+    if (t['Quantity'] !== undefined && t.lotSize === undefined) t.lotSize = t['Quantity'];
+    if (t['Side'] !== undefined && t.direction === undefined) t.direction = t['Side'];
+    if (t['Commission'] !== undefined && t.commission === undefined) t.commission = t['Commission'];
+    if (t['Fees'] !== undefined && t.fees === undefined) t.fees = t['Fees'];
+    if (t['Date'] !== undefined && t.date === undefined) t.date = t['Date'];
+    if (t['Time'] !== undefined && t.date === undefined) t.date = t['Time'];
+
+    // Broker statement style headers (like your XLSX screenshot)
+    if (t['S/L'] !== undefined && t.stopLoss === undefined) t.stopLoss = t['S/L'];
+    if (t['T/P'] !== undefined && t.takeProfit === undefined) t.takeProfit = t['T/P'];
+    if (t['Volume'] !== undefined && t.lotSize === undefined) t.lotSize = t['Volume'];
+    if (t['Type'] !== undefined && t.direction === undefined) t.direction = t['Type'];
+    if (t['Profit'] !== undefined && t.pl === undefined) t.pl = t['Profit'];
+
+    if (normMap['s/l'] !== undefined && t.stopLoss === undefined) t.stopLoss = normMap['s/l'];
+    if (normMap['t/p'] !== undefined && t.takeProfit === undefined) t.takeProfit = normMap['t/p'];
+    if (normMap['volume'] !== undefined && t.lotSize === undefined) t.lotSize = normMap['volume'];
+    if (normMap['type'] !== undefined && t.direction === undefined) t.direction = normMap['type'];
+    if (normMap['profit'] !== undefined && t.pl === undefined) t.pl = normMap['profit'];
+
+    // Column-position fallback (per user-provided broker statement layout)
+    // If SL/TP are not captured via headers, read them from column G/H.
+    // A=0, B=1, ..., G=6, H=7
+    if ((t.stopLoss === undefined || t.stopLoss === null || String(t.stopLoss).trim() === '') && Array.isArray(t.__xlsxRow)) {
+        const sl = toNumberOrNull(t.__xlsxRow[6]);
+        if (sl !== null) t.stopLoss = sl;
+    }
+    if ((t.takeProfit === undefined || t.takeProfit === null || String(t.takeProfit).trim() === '') && Array.isArray(t.__xlsxRow)) {
+        const tp = toNumberOrNull(t.__xlsxRow[7]);
+        if (tp !== null) t.takeProfit = tp;
+    }
+
+    // Some exports repeat column names (e.g. two Price columns => Price, Price (2))
+    // We treat the first as entry and the second as exit.
+    if (t['Price'] !== undefined && t.entry === undefined) t.entry = t['Price'];
+    if (t['Price (2)'] !== undefined && t.exitPrice === undefined) t.exitPrice = t['Price (2)'];
+    if (t['price'] !== undefined && t.entry === undefined) t.entry = t['price'];
+    if (t['price (2)'] !== undefined && t.exitPrice === undefined) t.exitPrice = t['price (2)'];
+    if (t['Time (2)'] !== undefined && t.completionTime === undefined) t.completionTime = t['Time (2)'];
+
+    // Also accept common alt spellings
+    if (t['SL'] !== undefined && t.stopLoss === undefined) t.stopLoss = t['SL'];
+    if (t['TP'] !== undefined && t.takeProfit === undefined) t.takeProfit = t['TP'];
+
+    // Normalize direction strings
+    if (t.direction !== undefined && t.direction !== null) {
+        const d = String(t.direction).trim().toLowerCase();
+        if (d === 'buy' || d === 'long') t.direction = 'BUY';
+        else if (d === 'sell' || d === 'short') t.direction = 'SELL';
+    }
+
+    // Coerce numeric fields
+    ['entry','stopLoss','takeProfit','exitPrice','pl','lotSize','confidence'].forEach(k => {
+        const n = toNumberOrNull(t[k]);
+        if (n !== null) t[k] = n;
+    });
+
+    // Broker columns may come in as strings even after above coercion
+    ['commission','fees','swap'].forEach(k => {
+        const n = toNumberOrNull(t[k]);
+        if (n !== null) t[k] = n;
+    });
+
+    // Normalize dates
+    const dateIso = toIsoOrNull(t.date) || toIsoOrNull(t.completionTime) || toIsoOrNull(t.entryTime) || toIsoOrNull(t.approvalTime);
+    if (dateIso) t.date = dateIso;
+    if (t.entryTime) t.entryTime = toIsoOrNull(t.entryTime) || t.entryTime;
+    if (t.completionTime) t.completionTime = toIsoOrNull(t.completionTime) || t.completionTime;
+    if (t.approvalTime) t.approvalTime = toIsoOrNull(t.approvalTime) || t.approvalTime;
+
+    // Compute P/L if missing but entry/exit/direction exist (broker CSV example)
+    if ((t.pl === undefined || t.pl === null || Number.isNaN(Number(t.pl))) &&
+        Number.isFinite(Number(t.entry)) && Number.isFinite(Number(t.exitPrice)) && t.direction) {
+        const dir = String(t.direction).toUpperCase();
+        const rawMove = dir === 'SELL' ? (Number(t.entry) - Number(t.exitPrice)) : (Number(t.exitPrice) - Number(t.entry));
+        const commission = Number.isFinite(Number(t.commission)) ? Number(t.commission) : 0;
+        const fees = Number.isFinite(Number(t.fees)) ? Number(t.fees) : 0;
+        // Note: Without contract size/pip value, this is a price-move proxy. It preserves win/loss direction.
+        t.pl = rawMove - commission - fees;
+    }
+
+    // Derive outcome if missing
+    if ((t.outcome === undefined || t.outcome === null || t.outcome === '') &&
+        t.pl !== undefined && t.pl !== null && !Number.isNaN(Number(t.pl))) {
+        const pl = Number(t.pl);
+        t.outcome = pl > 0 ? 'TP' : pl < 0 ? 'SL' : 'BE';
+    }
+
+    // Defaults
+    t.id = ensureTradeId(t);
+    if (!t.status) t.status = 'completed';
+    if (!t.completionTime && t.status === 'completed') t.completionTime = t.date || new Date().toISOString();
+
+    // Avoid huge blobs being imported through JSON
+    if (t.beforePicture && String(t.beforePicture).length > 2000) t.beforePicture = null;
+    if (t.afterPicture && String(t.afterPicture).length > 2000) t.afterPicture = null;
+
+    return t;
+}
+
+function mergeIntoApprovedTrades(importedTrades) {
+    const existing = getApprovedTradesAllStatuses();
+    const byId = new Map(existing.map(t => [String(t.id), t]));
+    let added = 0;
+    let updated = 0;
+
+    (importedTrades || []).forEach(raw => {
+        const t = normalizeImportedTrade(raw);
+        const id = String(t.id);
+        if (byId.has(id)) {
+            byId.set(id, { ...byId.get(id), ...t });
+            updated++;
+        } else {
+            byId.set(id, t);
+            added++;
+        }
+    });
+
+    const merged = Array.from(byId.values());
+    safeLocalStorage.setItem('approvedTrades', JSON.stringify(stripApprovedTradeImages(merged)));
+    return { added, updated, total: merged.length };
+}
+
+function normalizeXlsxHeader(h) {
+    return String(h || '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*\/\s*/g, '/')
+        .trim()
+        .toLowerCase();
+}
+
+function pickFirstNonEmpty(obj, keys) {
+    for (const k of keys) {
+        if (obj[k] !== undefined && obj[k] !== null && String(obj[k]).trim() !== '') return obj[k];
+    }
+    return null;
+}
+
+function parseBrokerStatementRow(row) {
+    // Attempt to map common broker statement headers like in the screenshot.
+    const normMap = {};
+    Object.keys(row || {}).forEach(k => {
+        normMap[normalizeXlsxHeader(k)] = row[k];
+    });
+
+    const symbol = pickFirstNonEmpty(normMap, ['symbol', 'pair']);
+    if (!symbol) return null;
+
+    const typeRaw = pickFirstNonEmpty(normMap, ['type', 'direction', 'side']);
+    const type = String(typeRaw || '').toLowerCase();
+    const direction = type === 'sell' ? 'SELL' : type === 'buy' ? 'BUY' : (String(typeRaw || '').toUpperCase() || '');
+
+    const entryPrice = pickFirstNonEmpty(normMap, ['price', 'open price', 'entry', 'entry price']);
+    const stopLoss = pickFirstNonEmpty(normMap, ['s/l', 'sl', 'stop loss', 'stoploss']);
+    const takeProfit = pickFirstNonEmpty(normMap, ['t/p', 'tp', 'take profit', 'takeprofit']);
+
+    const commission = toNumberOrNull(pickFirstNonEmpty(normMap, ['commission', 'comm'])) || 0;
+    const swap = toNumberOrNull(pickFirstNonEmpty(normMap, ['swap'])) || 0;
+    const profit = toNumberOrNull(pickFirstNonEmpty(normMap, ['profit', 'p/l', 'pl'])) || 0;
+
+    const volume = toNumberOrNull(pickFirstNonEmpty(normMap, ['volume', 'lots', 'lot'])) || null;
+
+    // Time: the sheet may contain multiple time columns (open/close). We'll use the first viable.
+    const timeVal = pickFirstNonEmpty(normMap, ['time', 'close time', 'open time', 'date']);
+    const dateIso = toIsoOrNull(timeVal) || new Date().toISOString();
+
+    // Position/ticket id if present; else we will generate one
+    const position = pickFirstNonEmpty(normMap, ['position', 'ticket', 'id']);
+
+    // Build a completed trade by default since statements are closed positions.
+    // pl: use Profit column directly (it usually already includes commissions/swaps).
+    const trade = {
+        id: position ? String(position) : undefined,
+        status: 'completed',
+        pair: String(symbol).toUpperCase(),
+        direction,
+        entry: toNumberOrNull(entryPrice) ?? undefined,
+        stopLoss: toNumberOrNull(stopLoss) ?? undefined,
+        takeProfit: toNumberOrNull(takeProfit) ?? undefined,
+        lotSize: volume ?? undefined,
+        pl: profit,
+        commission,
+        swap,
+        completionTime: dateIso,
+        date: dateIso
+    };
+
+    return trade;
+}
+
+function findXlsxHeaderRowIndex(matrix) {
+    // matrix: Array<Array<any>> from sheet_to_json(..., {header:1})
+    const requiredAny = ['symbol', 'type', 'side'];
+    const requiredAlso = ['price', 'profit', 'entry price', 'exit price'];
+    for (let i = 0; i < Math.min(matrix.length, 50); i++) {
+        const row = matrix[i] || [];
+        const norm = row.map(c => normalizeXlsxHeader(c));
+        const hasSymbol = norm.includes('symbol');
+        const hasType = requiredAny.some(k => norm.includes(k));
+        const hasSomePricing = requiredAlso.some(k => norm.includes(k));
+        if (hasSymbol && hasType && hasSomePricing) return i;
+    }
+    return -1;
+}
+
+function xlsxRowsToObjects(matrix, headerIndex) {
+    const rawHeaders = (matrix[headerIndex] || []).map(h => String(h || '').trim());
+    const used = new Map();
+    const headers = rawHeaders.map(h => {
+        if (!h) return '';
+        const count = (used.get(h) || 0) + 1;
+        used.set(h, count);
+        return count === 1 ? h : `${h} (${count})`;
+    });
+    const out = [];
+    for (let r = headerIndex + 1; r < matrix.length; r++) {
+        const row = matrix[r];
+        if (!row || !row.length) continue;
+        // Skip rows that are fully empty
+        const hasAny = row.some(v => String(v ?? '').trim() !== '');
+        if (!hasAny) continue;
+        const obj = {};
+        headers.forEach((h, c) => {
+            if (!h) return;
+            obj[h] = row[c];
+        });
+        // Preserve raw row values for column-position fallbacks (e.g., fixed broker statement formats).
+        obj.__xlsxRow = row;
+        out.push(obj);
+    }
+    return out;
+}
+
+function importXlsxFile(e) {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+
+    if (typeof XLSX === 'undefined') {
+        showToast('XLSX library not loaded. Please refresh the page.', 3500);
+        try { e.target.value = ''; } catch (err) {}
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(ev) {
+        try {
+            const data = new Uint8Array(ev.target.result);
+            const wb = XLSX.read(data, { type: 'array' });
+            const sheetName = wb.SheetNames && wb.SheetNames[0];
+            if (!sheetName) { showToast('No sheets found in XLSX', 2500); return; }
+            const ws = wb.Sheets[sheetName];
+
+            // Parse as raw matrix first so we can find the actual header row (many statements
+            // have title/date rows above the table).
+            const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+            if (!Array.isArray(matrix) || !matrix.length) { showToast('XLSX sheet is empty', 2500); return; }
+
+            const headerIndex = findXlsxHeaderRowIndex(matrix);
+            if (headerIndex < 0) {
+                showToast('Could not find trade table header row in XLSX', 3200);
+                return;
+            }
+
+            const objects = xlsxRowsToObjects(matrix, headerIndex);
+            const importedTrades = [];
+            objects.forEach(obj => {
+                const t = normalizeImportedTrade(obj);
+                // Require at least a symbol/pair and a side/type to treat as a trade
+                const sym = t.pair || t.Symbol || t.symbol;
+                const dir = t.direction || t.Side || t.Type;
+                if (sym && dir) importedTrades.push(t);
+            });
+
+            if (!importedTrades.length) {
+                showToast('No trade rows recognized in XLSX', 3000);
+                return;
+            }
+
+            const res = mergeIntoApprovedTrades(importedTrades);
+            updateDashboard();
+            updateTradeTable();
+            displayLiveTrades();
+            displayCompletedTrades();
+            try { renderPhase4Dashboard(); } catch (err) {}
+            showToast(`Imported XLSX: ${res.added} added, ${res.updated} updated`, 3400);
+        } catch (err) {
+            console.error('XLSX import failed:', err);
+            showToast('Failed to import XLSX', 2600);
+        }
+    };
+    reader.readAsArrayBuffer(file);
+    try { e.target.value = ''; } catch (err) {}
+}
+
 function importCsvFile(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -4994,31 +5888,28 @@ function importCsvFile(e) {
         parseAndImportCsv(text);
     };
     reader.readAsText(file);
+    try { e.target.value = ''; } catch (err) {}
 }
 
 function parseAndImportCsv(text) {
     const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length);
     if (!lines.length) { showToast('Empty CSV file', 2200); return; }
     const headers = splitCsvLine(lines.shift()).map(h => h.replace(/"/g,'').trim());
-    const all = getAllTrades();
-    let imported = 0;
+    const importedTrades = [];
     lines.forEach(line => {
         const cols = splitCsvLine(line).map(c => c.replace(/^"|"$/g,'').replace(/""/g,'"'));
         if (!cols.length) return;
         const obj = {};
         headers.forEach((h,i)=> { obj[h]=cols[i]!==undefined ? cols[i] : ''; });
-        // coerce obvious numeric fields
-        ['entry','stop','tp','rMultiple','confluenceScore','confidence','impulse'].forEach(k=>{
-            if (obj[k]!==undefined && obj[k]!=='' && !isNaN(obj[k])) obj[k]=parseFloat(obj[k]);
-        });
-        // normalize date
-        obj.date = obj.date ? new Date(obj.date).toISOString() : new Date().toISOString();
-        all.push(obj);
-        imported++;
+        importedTrades.push(obj);
     });
-    localStorage.setItem('tradeJournals', JSON.stringify(all));
-    loadDashboard();
-    showToast('Imported ' + imported + ' trades from CSV', 3000);
+    const res = mergeIntoApprovedTrades(importedTrades);
+    updateDashboard();
+    updateTradeTable();
+    displayLiveTrades();
+    displayCompletedTrades();
+    try { renderPhase4Dashboard(); } catch (e) {}
+    showToast(`Imported CSV: ${res.added} added, ${res.updated} updated`, 3200);
 }
 
 // robust CSV line splitter that handles quoted fields with commas
@@ -5057,17 +5948,17 @@ function importJsonFile(e) {
         try {
             const parsed = JSON.parse(ev.target.result);
             if (!Array.isArray(parsed)) { showToast('JSON must contain an array of trades', 2600); return; }
-            const all = getAllTrades();
-            parsed.forEach(obj => {
-                if (obj.date) obj.date = new Date(obj.date).toISOString();
-                all.push(obj);
-            });
-            localStorage.setItem('tradeJournals', JSON.stringify(all));
-            loadDashboard();
-            showToast('Imported ' + parsed.length + ' trades from JSON', 3000);
+            const res = mergeIntoApprovedTrades(parsed);
+            updateDashboard();
+            updateTradeTable();
+            displayLiveTrades();
+            displayCompletedTrades();
+            try { renderPhase4Dashboard(); } catch (e) {}
+            showToast(`Imported JSON: ${res.added} added, ${res.updated} updated`, 3200);
         } catch (err) { showToast('Invalid JSON file', 2200); }
     };
     reader.readAsText(file);
+    try { e.target.value = ''; } catch (err) {}
 }
 
 // -------------------- Chart Tooltip --------------------
@@ -5116,6 +6007,8 @@ loadDashboard = function() {
 // Current filters
 let currentFilters = { dateStart: null, dateEnd: null, strategy: '', pair: '', emotion: '', outcome: '' };
 
+let journalDayFilterIso = null;
+
 function applyFilters() {
     const el1 = document.getElementById('filter_dateStart');
     currentFilters.dateStart = el1 ? el1.value || null : null;
@@ -5156,12 +6049,12 @@ function getFilteredTrades() {
     let all = getApprovedCompletedTrades();
     if (currentFilters.dateStart) {
         const ds = new Date(currentFilters.dateStart);
-        all = all.filter(t => new Date(getTradeDate(t) || 0) >= ds);
+        all = all.filter(t => new Date(getTradeCompletionDate(t) || 0) >= ds);
     }
     if (currentFilters.dateEnd) {
         const de = new Date(currentFilters.dateEnd);
         de.setHours(23, 59, 59);
-        all = all.filter(t => new Date(getTradeDate(t) || 0) <= de);
+        all = all.filter(t => new Date(getTradeCompletionDate(t) || 0) <= de);
     }
     if (currentFilters.strategy) all = all.filter(t => t.strategy === currentFilters.strategy);
     if (currentFilters.pair) all = all.filter(t => t.pair === currentFilters.pair);
@@ -5213,6 +6106,7 @@ function computePhase4Analytics(trades) {
         totalPL: 0,
         profitFactor: 0,
         avgRR: 0,
+        winLossRRNet: '0.00',
         pnlByEmotion: {},
         riskRewardByTrade: [],
         equityCurve: [],
@@ -5220,7 +6114,9 @@ function computePhase4Analytics(trades) {
         alerts: []
     };
 
-    let grossWin = 0, grossLoss = 0, rrSum = 0, rrCount = 0;
+    let grossWin = 0, grossLoss = 0;
+    let rrSumWins = 0, rrCountWins = 0;
+    let rrWinsTotal = 0;
     let cumulativePL = 0;
     let peak = 0;
 
@@ -5236,14 +6132,16 @@ function computePhase4Analytics(trades) {
         if (pl > 0) grossWin += pl;
         if (pl < 0) grossLoss += Math.abs(pl);
 
-        // RR for this trade
-        const entry = parseFloat(t.entry ?? 0);
-        const stop = parseFloat(t.stop ?? t.stopLoss ?? 0);
-        if (Number.isFinite(entry) && Number.isFinite(stop) && entry !== stop && pl !== 0) {
-            const rr = Math.abs(pl / Math.abs(entry - stop));
-            metrics.riskRewardByTrade.push(rr);
-            rrSum += rr;
-            rrCount++;
+        // Realized R (price-based). Excludes trades where risk is invalid (e.g., trailed SL beyond entry).
+        const r = getTradeRealizedR(t);
+        if (r !== null && Number.isFinite(r)) {
+            const absR = Math.abs(r);
+            metrics.riskRewardByTrade.push(absR);
+            if (pl > 0) {
+                rrSumWins += absR;
+                rrCountWins += 1;
+                rrWinsTotal += absR;
+            }
         }
 
         // Emotion tracking
@@ -5259,9 +6157,98 @@ function computePhase4Analytics(trades) {
 
     metrics.winRate = metrics.totalTrades ? Math.round((metrics.wins / metrics.totalTrades) * 100) : 0;
     metrics.profitFactor = grossLoss === 0 ? (grossWin || 0) : Number((grossWin / grossLoss).toFixed(2));
-    metrics.avgRR = rrCount ? Number((rrSum / rrCount).toFixed(2)) : 0;
-
+    metrics.avgRR = rrCountWins ? (rrSumWins / rrCountWins).toFixed(2) : '0.00';
+    metrics.winLossRRNet = Number.isFinite(rrWinsTotal) ? (rrWinsTotal - metrics.losses).toFixed(2) : '0.00';
     return metrics;
+}
+
+function computeSharpeRatio(returns, riskFree = 0) {
+    const xs = (Array.isArray(returns) ? returns : []).filter(v => Number.isFinite(v));
+    if (xs.length < 2) return null;
+    const excess = xs.map(r => r - riskFree);
+    const mean = excess.reduce((a, b) => a + b, 0) / excess.length;
+    const variance = excess.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / (excess.length - 1);
+    const sd = Math.sqrt(variance);
+    if (!sd) return null;
+    return mean / sd;
+}
+
+function computeSortinoRatio(returns, target = 0) {
+    const xs = (Array.isArray(returns) ? returns : []).filter(v => Number.isFinite(v));
+    if (!xs.length) return null;
+    const mean = xs.reduce((a, b) => a + b, 0) / xs.length;
+    const downside = xs.map(r => Math.min(0, r - target));
+    const downsideVar = downside.reduce((a, b) => a + b * b, 0) / xs.length;
+    const downsideDev = Math.sqrt(downsideVar);
+    if (!downsideDev) return null;
+    return (mean - target) / downsideDev;
+}
+
+function computeMaxDrawdownPctFromEquity(equity) {
+    let peak = -Infinity;
+    let maxDdPct = 0;
+    for (const v of equity) {
+        if (!Number.isFinite(v)) continue;
+        if (v > peak) peak = v;
+        if (peak > 0) {
+            const ddPct = (peak - v) / peak;
+            if (ddPct > maxDdPct) maxDdPct = ddPct;
+        }
+    }
+    return maxDdPct;
+}
+
+function computeRecoveryPeriodDays(trades) {
+    const all = Array.isArray(trades) ? trades.slice() : [];
+    if (all.length < 2) return null;
+    all.sort((a, b) => new Date(getTradeCompletionDate(a) || 0) - new Date(getTradeCompletionDate(b) || 0));
+
+    // Compute equity series with timestamps
+    const points = [];
+    let equity = 0;
+    for (const t of all) {
+        const dt = new Date(getTradeCompletionDate(t) || 0);
+        if (isNaN(dt.getTime())) continue;
+        equity += getTradePL(t);
+        points.push({ t: dt, equity });
+    }
+    if (points.length < 2) return null;
+
+    // Find maximum drawdown window: peak -> trough
+    let peakEq = points[0].equity;
+    let peakIdx = 0;
+    let maxDd = 0;
+    let maxPeakIdx = 0;
+    let maxTroughIdx = 0;
+
+    for (let i = 1; i < points.length; i++) {
+        const v = points[i].equity;
+        if (v > peakEq) {
+            peakEq = v;
+            peakIdx = i;
+        }
+        const dd = v - peakEq; // negative in drawdown
+        if (dd < maxDd) {
+            maxDd = dd;
+            maxPeakIdx = peakIdx;
+            maxTroughIdx = i;
+        }
+    }
+
+    if (maxDd === 0) return 0;
+    const targetPeakEq = points[maxPeakIdx].equity;
+    const startTime = points[maxPeakIdx].t;
+
+    // Recovery: first time equity exceeds the peak prior to max drawdown
+    for (let i = maxTroughIdx + 1; i < points.length; i++) {
+        if (points[i].equity >= targetPeakEq) {
+            const days = Math.max(0, Math.round((points[i].t - startTime) / (1000 * 60 * 60 * 24)));
+            return days;
+        }
+    }
+
+    // Not recovered within timeframe
+    return null;
 }
 
 function renderSimpleLineChart(canvasId, series, color, fillColor) {
@@ -5528,6 +6515,36 @@ function computeAdvancedMetrics(trades, phase4Metrics) {
     const sqn = computeSQN(pls);
     const tilt = computeTiltRisk(trades);
 
+    const realizedR = trades.map(t => getTradeRealizedR(t)).filter(v => v !== null && Number.isFinite(v));
+    const sharpe = computeSharpeRatio(realizedR, 0);
+    const sortino = computeSortinoRatio(realizedR, 0);
+
+    let calmar = null;
+    try {
+        const startBal = Number(document.getElementById('accountBalance')?.value || 10000);
+        if (Number.isFinite(startBal) && startBal > 0) {
+            const eq = [];
+            let cum = 0;
+            const sorted = Array.isArray(trades) ? trades.slice().sort((a, b) => new Date(getTradeCompletionDate(a) || 0) - new Date(getTradeCompletionDate(b) || 0)) : [];
+            sorted.forEach(t => {
+                cum += getTradePL(t);
+                eq.push(startBal + cum);
+            });
+            const firstT = sorted.length ? new Date(getTradeCompletionDate(sorted[0]) || 0) : null;
+            const lastT = sorted.length ? new Date(getTradeCompletionDate(sorted[sorted.length - 1]) || 0) : null;
+            const years = firstT && lastT && !isNaN(firstT.getTime()) && !isNaN(lastT.getTime()) ? Math.max(1 / 365, (lastT - firstT) / (1000 * 60 * 60 * 24 * 365)) : null;
+            const endBal = eq.length ? eq[eq.length - 1] : startBal + net;
+            const maxDdPct = eq.length ? computeMaxDrawdownPctFromEquity(eq) : 0;
+            const minYears = 30 / 365;
+            if (years && years >= minYears && endBal > 0 && maxDdPct >= 0.0001) {
+                const cagr = Math.pow(endBal / startBal, 1 / years) - 1;
+                calmar = cagr / maxDdPct;
+            }
+        }
+    } catch (e) {}
+
+    const recoveryPeriodDays = computeRecoveryPeriodDays(trades);
+
     return {
         expectancy,
         payoff,
@@ -5538,8 +6555,130 @@ function computeAdvancedMetrics(trades, phase4Metrics) {
         maxDrawdown: maxDD,
         recovery,
         sqn,
-        tilt
+        tilt,
+        sharpe,
+        sortino,
+        calmar,
+        recoveryPeriodDays
     };
+}
+
+const metricHelp = {
+    metric_totalTrades: { title: 'Total Trades', text: 'Count of approved completed trades in the selected timeframe.', threshold: 'More data is better; 30+ trades is a more stable sample.' },
+    metric_wins: { title: 'Winning Trades', text: 'Number of trades with positive P/L in the selected timeframe.', threshold: 'Combine with win rate and payoff ratio.' },
+    metric_losses: { title: 'Losing Trades', text: 'Number of trades with negative P/L in the selected timeframe.', threshold: 'Lower is better, but context matters.' },
+    metric_breaks: { title: 'Break-even Trades', text: 'Number of trades with exactly zero P/L.', threshold: 'Too many may indicate poor exits or over-management.' },
+    metric_winRate: { title: 'Win Rate', text: 'Wins / total trades.', threshold: 'Profitable systems can be <50% if payoff is high.' },
+    metric_profitFactor: { title: 'Profit Factor', text: 'Gross profit / gross loss.', threshold: 'Above 1.2 is a good baseline; 1.5+ is strong.' },
+    metric_avgRR: { title: 'Avg R:R (wins)', text: 'Average realized R-multiple of winning trades only (uses entry/exit/SL). Trades with trailed SL beyond entry are excluded.', threshold: 'Above 2 is strong; your profitability depends on win rate too.' },
+    metric_winLossRRNet: { title: 'Win-Loss RR Net', text: 'A simple “net R score”. It adds up the realized R-multiple of every winning trade, then subtracts 1 point per losing trade. Example: five 4R wins and two losses => 20 - 2 = 18. This helps you see if big winners are outweighing the cost of losses.', threshold: 'Above 0 is required; higher is better.' },
+    adv_expectancy: { title: 'Expectancy', text: 'Average P/L per trade.', threshold: 'Positive is required for profitability.' },
+    adv_payoff: { title: 'Payoff Ratio', text: 'Average win / |average loss|.', threshold: 'Above 1 is good; 2+ is strong.' },
+    adv_avgWin: { title: 'Avg Win', text: 'Average P/L of winning trades.', threshold: 'Higher is better; compare to Avg Loss.' },
+    adv_avgLoss: { title: 'Avg Loss', text: 'Average P/L of losing trades (negative).', threshold: 'Smaller magnitude is better.' },
+    adv_bestWinStreak: { title: 'Best Win Streak', text: 'Maximum consecutive wins in the selected timeframe.', threshold: 'Context dependent.' },
+    adv_worstLossStreak: { title: 'Worst Loss Streak', text: 'Maximum consecutive losses in the selected timeframe.', threshold: 'Context dependent; aim to reduce.' },
+    adv_maxDrawdown: { title: 'Max Drawdown', text: 'Largest peak-to-trough decline in cumulative equity during the timeframe.', threshold: 'Lower magnitude is better.' },
+    adv_recovery: { title: 'Recovery Factor', text: 'Net profit / |max drawdown|.', threshold: 'Above 1 suggests you recover drawdowns with net gains.' },
+    adv_sqn: { title: 'SQN', text: 'System Quality Number: (mean return / stddev) * sqrt(n). Uses P/L series.', threshold: 'Above 2 is typically good; 3+ is strong.' },
+    adv_tiltRisk: { title: 'Tilt Risk', text: 'Compares performance of trades taken after a loss vs normal trades (a psychology proxy).', threshold: 'Lower tilt risk is better.' },
+    adv_sharpe: { title: 'Sharpe Ratio', text: 'Mean(returns) / StdDev(returns). Here returns are realized R-multiples (risk-free assumed 0).', threshold: 'Above 1 is good; 2+ is excellent.' },
+    adv_sortino: { title: 'Sortino Ratio', text: 'Mean(returns - target) / DownsideDeviation(target). Here target = 0 and returns are realized R-multiples.', threshold: 'Above 1 is good; 2+ is strong.' },
+    adv_calmar: { title: 'Calmar Ratio', text: 'Risk-adjusted growth. It estimates CAGR (growth rate) over the selected timeframe and divides it by the maximum drawdown percentage from the equity curve. High values mean strong growth with shallow drawdowns. If drawdown is near zero, the ratio can become meaningless, so the app hides it in that case.', threshold: 'Above 1 is good; 2+ is strong.' },
+    adv_recoveryPeriod: { title: 'Recovery Period', text: 'Days to recover from the maximum drawdown: from the peak before the max drawdown to the first new equity high after that peak (within timeframe).', threshold: 'Shorter is better.' }
+};
+
+function hideMetricHelpPopover() {
+    const pop = document.getElementById('metricHelpPopover');
+    if (pop) pop.style.display = 'none';
+}
+
+function showMetricHelp(key, anchorEl) {
+    const cfg = metricHelp[key];
+    if (!cfg || !anchorEl) return;
+
+    let pop = document.getElementById('metricHelpPopover');
+    if (!pop) {
+        pop = document.createElement('div');
+        pop.id = 'metricHelpPopover';
+        pop.style.position = 'fixed';
+        pop.style.zIndex = '99999';
+        pop.style.maxWidth = '320px';
+        pop.style.width = '78vw';
+        pop.style.background = '#0f172a';
+        pop.style.border = '1px solid rgba(148,163,184,0.25)';
+        pop.style.borderRadius = '10px';
+        pop.style.padding = '12px 12px 10px 12px';
+        pop.style.boxShadow = '0 10px 30px rgba(0,0,0,0.45)';
+        pop.style.display = 'none';
+        pop.innerHTML = '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px"><div id="metricHelpTitle" style="font-weight:700;font-size:13px;color:#e2e8f0"></div><button id="metricHelpX" class="btn-secondary" style="padding:4px 8px;line-height:1;min-height:unset">x</button></div><div id="metricHelpText" style="margin-top:6px;font-size:12px;line-height:1.35;color:#cbd5e1"></div><div id="metricHelpThreshold" style="margin-top:8px;font-size:12px;color:#94a3b8"></div>';
+        document.body.appendChild(pop);
+
+        const onDocClick = (e) => {
+            if (!pop || pop.style.display === 'none') return;
+            if (pop.contains(e.target)) return;
+            if (e.target && e.target.closest && e.target.closest('[data-help-key]')) return;
+            hideMetricHelpPopover();
+        };
+        document.addEventListener('click', onDocClick);
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') hideMetricHelpPopover();
+        });
+
+        const xBtn = pop.querySelector('#metricHelpX');
+        if (xBtn) xBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            hideMetricHelpPopover();
+        });
+    }
+
+    const titleEl = pop.querySelector('#metricHelpTitle');
+    const textEl = pop.querySelector('#metricHelpText');
+    const thrEl = pop.querySelector('#metricHelpThreshold');
+    if (titleEl) titleEl.textContent = cfg.title;
+    if (textEl) textEl.textContent = cfg.text;
+    if (thrEl) thrEl.textContent = 'Profitability baseline: ' + (cfg.threshold || '--');
+
+    const rect = anchorEl.getBoundingClientRect();
+    const margin = 10;
+    const approxWidth = Math.min(320, Math.max(240, Math.round(window.innerWidth * 0.78)));
+    const approxHeight = 170;
+
+    let left = rect.right + 8;
+    let top = rect.top - 8;
+    if (left + approxWidth + margin > window.innerWidth) left = Math.max(margin, rect.left - approxWidth - 8);
+    if (top + approxHeight + margin > window.innerHeight) top = Math.max(margin, window.innerHeight - approxHeight - margin);
+    if (top < margin) top = margin;
+
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+    pop.setAttribute('data-open-key', key);
+    pop.style.display = 'block';
+}
+
+function bindMetricHelpIcons() {
+    try {
+        const els = document.querySelectorAll('[data-help-key]');
+        els.forEach(el => {
+            if (el.__helpBound) return;
+            el.__helpBound = true;
+            el.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const key = el.getAttribute('data-help-key');
+                const pop = document.getElementById('metricHelpPopover');
+                const isOpen = !!pop && pop.style.display !== 'none';
+                const openKey = pop ? pop.getAttribute('data-open-key') : null;
+
+                if (isOpen && openKey === key) {
+                    hideMetricHelpPopover();
+                    return;
+                }
+                showMetricHelp(key, el);
+            });
+        });
+    } catch (e) {}
 }
 
 function setText(id, value) {
@@ -5557,11 +6696,9 @@ function bucketConfidence(value) {
 }
 
 function computeTradeRR(trade) {
-    const entry = Number(trade?.entry);
-    const stop = Number(trade?.stopLoss ?? trade?.stop);
-    const pl = getTradePL(trade);
-    if (!Number.isFinite(entry) || !Number.isFinite(stop) || entry === stop || pl === 0) return null;
-    return Math.abs(pl / Math.abs(entry - stop));
+    const r = getTradeRealizedR(trade);
+    if (r === null || !Number.isFinite(r)) return null;
+    return Math.abs(r);
 }
 
 function bucketRR(rr) {
@@ -5897,9 +7034,9 @@ function computeGroupStats(trades) {
     let rrSum = 0;
     let rrCount = 0;
     trades.forEach(t => {
-        const rr = computeTradeRR(t);
-        if (Number.isFinite(rr)) {
-            rrSum += rr;
+        const r = getTradeRealizedR(t);
+        if (r !== null && Number.isFinite(r)) {
+            rrSum += Math.abs(r);
             rrCount++;
         }
     });
@@ -6057,6 +7194,10 @@ function renderPhase4Dashboard() {
     if (el1) el1.textContent = metrics.totalTrades;
     const elWins = document.getElementById('metric_wins');
     if (elWins) elWins.textContent = metrics.wins;
+    const elLosses = document.getElementById('metric_losses');
+    if (elLosses) elLosses.textContent = metrics.losses;
+    const elBreaks = document.getElementById('metric_breaks');
+    if (elBreaks) elBreaks.textContent = metrics.breaks;
     const el2 = document.getElementById('metric_winRate') || document.getElementById('winRate');
     if (el2) el2.textContent = metrics.winRate + '%';
     const el3 = document.getElementById('metric_totalPL') || document.getElementById('totalPL');
@@ -6065,12 +7206,20 @@ function renderPhase4Dashboard() {
     if (el4) el4.textContent = metrics.profitFactor;
     const el5 = document.getElementById('metric_avgRR') || document.getElementById('avgRR');
     if (el5) el5.textContent = metrics.avgRR;
+    const elNet = document.getElementById('metric_winLossRRNet');
+    if (elNet) elNet.textContent = metrics.winLossRRNet;
 
     // Render charts
     renderRRChart(metrics);
     renderEmotionChart(metrics);
     renderDrawdownChart(metrics);
     renderSessionChart(filtered);
+
+    // Equity curve should match the same filtered timeframe as analytics.
+    try {
+        renderEquityChart(filtered);
+        attachChartTooltip();
+    } catch (e) {}
 
     // Advanced metrics
     const adv = computeAdvancedMetrics(filtered, metrics);
@@ -6084,6 +7233,14 @@ function renderPhase4Dashboard() {
     setText('adv_recovery', adv.recovery.toFixed(2));
     setText('adv_sqn', adv.sqn.toFixed(2));
     setText('adv_tiltRisk', adv.tilt.label);
+
+    setText('adv_sharpe', adv.sharpe === null ? '--' : adv.sharpe.toFixed(2));
+    setText('adv_sortino', adv.sortino === null ? '--' : adv.sortino.toFixed(2));
+    setText('adv_calmar', adv.calmar === null ? '--' : adv.calmar.toFixed(2));
+    setText('adv_recoveryPeriod', adv.recoveryPeriodDays === null ? '--' : String(adv.recoveryPeriodDays));
+
+    // Bind help icons (question marks) after content exists.
+    bindMetricHelpIcons();
 
     // Condition explorer
     refreshConditionExplorer();
@@ -6102,6 +7259,10 @@ function renderPhase4Dashboard() {
 
     // Render enhanced trade table
     renderPhase4TradeTable(filtered);
+
+    // Monthly heatmap + forecast
+    try { renderMonthlyPnlHeatmapUI(); } catch (e) {}
+    try { renderForecastModule(true); } catch (e) {}
 }
 
 // Render Phase 4 Trade Table with all columns
@@ -6122,12 +7283,13 @@ function renderPhase4TradeTable(trades) {
         const entry = parseFloat(t.entry ?? 0);
         const pl = getTradePL(t);
         const stop = parseFloat(t.stop ?? t.stopLoss ?? 0);
-        const rr = (entry && stop && pl !== 0) ? Math.abs(pl / Math.abs(entry - stop)).toFixed(2) : 'N/A';
+        const realizedR = getTradeRealizedR(t);
+        const rr = realizedR !== null ? Math.abs(realizedR).toFixed(2) : 'N/A';
         const outcome = pl > 0 ? 'Win' : pl < 0 ? 'Loss' : 'BE';
         const outcomeClass = pl > 0 ? 'outcome-win' : pl < 0 ? 'outcome-loss' : 'outcome-be';
         const emo = t.emotions || t.emotion || '-';
         const emoClass = 'emotion-' + (emo||'').toLowerCase().replace(/\s+/g, '-').split('-')[0];
-        const date = new Date(getTradeDate(t) || Date.now()).toLocaleDateString();
+        const date = new Date(getTradeCompletionDate(t) || Date.now()).toLocaleDateString();
         
         // Find actual index in allTrades
         const tradeIdx = allTrades.findIndex(tr => tr.id && tr.id === t.id);
