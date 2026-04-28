@@ -1114,11 +1114,11 @@ html, body {
 
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-    background-color: #0b1220;
-    background-image: linear-gradient(180deg, #0b1220 0%, #0f172a 55%, #0b1220 100%);
+    background-color: var(--t-bg, #0b1220);
+    background-image: linear-gradient(180deg, var(--t-bg, #0b1220) 0%, var(--t-bg2, #0f172a) 55%, var(--t-bg, #0b1220) 100%);
     background-attachment: fixed;
     position: relative;
-    color: #e6eef3;
+    color: var(--t-text, #e6eef3);
     line-height: 1.5;
 }
 
@@ -1127,8 +1127,236 @@ body::before {
     position: fixed;
     inset: 0;
     pointer-events: none;
-    background: radial-gradient(1200px 800px at 50% 20%, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.55) 65%, rgba(0, 0, 0, 0.75) 100%);
+    background: var(--t-radial, radial-gradient(1200px 800px at 50% 20%, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.55) 65%, rgba(0, 0, 0, 0.75) 100%));
     z-index: -1;
+}
+
+body[data-theme] {
+    --t-bg: #0b1220;
+    --t-bg2: #0f172a;
+    --t-text: #e6eef3;
+    --t-muted: #94a3b8;
+    --t-surface: rgba(30, 41, 59, 0.70);
+    --t-surfaceSolid: #1e293b;
+    --t-border: #334155;
+    --t-accent: #22c55e;
+    --t-accent2: rgba(34, 197, 94, 0.18);
+    --t-danger: #ef4444;
+    --t-shadow: rgba(0, 0, 0, 0.3);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.55) 65%, rgba(0, 0, 0, 0.75) 100%);
+}
+
+body[data-theme="theme1"] {
+    --t-bg: #0b1220;
+    --t-bg2: #0f172a;
+    --t-text: #e6eef3;
+    --t-muted: #94a3b8;
+    --t-surface: rgba(30, 41, 59, 0.70);
+    --t-surfaceSolid: #1e293b;
+    --t-border: #334155;
+    --t-accent: #22c55e;
+    --t-accent2: rgba(34, 197, 94, 0.18);
+}
+
+body[data-theme="theme2"] {
+    --t-bg: #FFFEF7;
+    --t-bg2: #F9F8F0;
+    --t-text: #00040D;
+    --t-muted: #475569;
+    --t-surface: rgba(255, 255, 255, 0.82);
+    --t-surfaceSolid: #ffffff;
+    --t-border: rgba(0, 4, 13, 0.16);
+    --t-accent: #0EA5A4;
+    --t-accent2: rgba(14, 165, 164, 0.18);
+    --t-shadow: rgba(15, 23, 42, 0.10);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(0, 4, 13, 0.06), rgba(255, 254, 247, 0.75) 65%, rgba(255, 254, 247, 0.92) 100%);
+}
+
+body[data-theme="theme3"] {
+    --t-bg: #0b0f14;
+    --t-bg2: #111827;
+    --t-text: #f8fafc;
+    --t-muted: #cbd5e1;
+    --t-surface: rgba(54, 69, 79, 0.55);
+    --t-surfaceSolid: #36454f;
+    --t-border: rgba(248, 250, 252, 0.14);
+    --t-accent: #DC2626;
+    --t-accent2: rgba(220, 38, 38, 0.18);
+    --t-danger: #ef4444;
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(220, 38, 38, 0.18), rgba(0, 0, 0, 0.65) 60%, rgba(0, 0, 0, 0.82) 100%);
+}
+
+body[data-theme="theme4"] {
+    --t-bg: #E5E7EB;
+    --t-bg2: #D1D5DB;
+    --t-text: #111827;
+    --t-muted: #374151;
+    --t-surface: rgba(255, 255, 255, 0.72);
+    --t-surfaceSolid: #F3F4F6;
+    --t-border: rgba(17, 24, 39, 0.14);
+    --t-accent: #4B5563;
+    --t-accent2: rgba(75, 85, 99, 0.18);
+    --t-shadow: rgba(15, 23, 42, 0.12);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(17, 24, 39, 0.08), rgba(229, 231, 235, 0.75) 70%, rgba(229, 231, 235, 0.92) 100%);
+}
+
+body[data-theme="theme5"] {
+    --t-bg: #FAF0BE;
+    --t-bg2: #F5F5DC;
+    --t-text: #2f2a33;
+    --t-muted: #5b5563;
+    --t-surface: rgba(255, 255, 255, 0.70);
+    --t-surfaceSolid: #fffaf0;
+    --t-border: rgba(47, 42, 51, 0.18);
+    --t-accent: #FF69B4;
+    --t-accent2: rgba(255, 105, 180, 0.18);
+    --t-shadow: rgba(47, 42, 51, 0.12);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(255, 105, 180, 0.20), rgba(245, 245, 220, 0.65) 65%, rgba(250, 240, 190, 0.88) 100%);
+}
+
+body[data-theme="theme6"] {
+    --t-bg: #111827;
+    --t-bg2: #111827;
+    --t-text: #f8fafc;
+    --t-muted: #e2e8f0;
+    --t-surface: rgba(17, 24, 39, 0.72);
+    --t-surfaceSolid: #111827;
+    --t-border: rgba(248, 250, 252, 0.14);
+    --t-accent: #FFEF00;
+    --t-accent2: rgba(200, 162, 200, 0.22);
+    --t-shadow: rgba(0, 0, 0, 0.35);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(255, 239, 0, 0.18), rgba(200, 162, 200, 0.14) 45%, rgba(17, 24, 39, 0.85) 100%);
+}
+
+body[data-theme="theme7"] {
+    --t-bg: #07151f;
+    --t-bg2: #0b2533;
+    --t-text: #f8fafc;
+    --t-muted: #cbd5e1;
+    --t-surface: rgba(7, 21, 31, 0.72);
+    --t-surfaceSolid: #0b2533;
+    --t-border: rgba(248, 250, 252, 0.14);
+    --t-accent: #EDCD44;
+    --t-accent2: rgba(129, 202, 214, 0.22);
+    --t-danger: #DC3E26;
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(129, 202, 214, 0.22), rgba(7, 21, 31, 0.70) 60%, rgba(7, 21, 31, 0.88) 100%);
+}
+
+body[data-theme="theme8"] {
+    --t-bg: #0a0a14;
+    --t-bg2: #1803A5;
+    --t-text: #F2EC9B;
+    --t-muted: rgba(242, 236, 155, 0.78);
+    --t-surface: rgba(24, 3, 165, 0.22);
+    --t-surfaceSolid: rgba(24, 3, 165, 0.55);
+    --t-border: rgba(150, 255, 189, 0.22);
+    --t-accent: #96FFBD;
+    --t-accent2: rgba(150, 255, 189, 0.18);
+    --t-shadow: rgba(0, 0, 0, 0.4);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(150, 255, 189, 0.22), rgba(24, 3, 165, 0.30) 55%, rgba(10, 10, 20, 0.90) 100%);
+}
+
+body[data-theme="theme9"] {
+    --t-bg: #0b1024;
+    --t-bg2: #224193;
+    --t-text: #f8fafc;
+    --t-muted: rgba(248, 250, 252, 0.78);
+    --t-surface: rgba(34, 65, 147, 0.35);
+    --t-surfaceSolid: rgba(34, 65, 147, 0.65);
+    --t-border: rgba(111, 155, 209, 0.30);
+    --t-accent: #DF3C5F;
+    --t-accent2: rgba(223, 60, 95, 0.18);
+    --t-shadow: rgba(0, 0, 0, 0.38);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(223, 60, 95, 0.22), rgba(34, 65, 147, 0.35) 55%, rgba(11, 16, 36, 0.92) 100%);
+}
+
+body[data-theme="theme10"] {
+    --t-bg: #0b1220;
+    --t-bg2: #111827;
+    --t-text: #f8fafc;
+    --t-muted: #cbd5e1;
+    --t-surface: rgba(107, 139, 164, 0.18);
+    --t-surfaceSolid: rgba(31, 41, 55, 0.92);
+    --t-border: rgba(191, 197, 201, 0.24);
+    --t-accent: #6B8BA4;
+    --t-accent2: rgba(107, 139, 164, 0.18);
+    --t-shadow: rgba(0, 0, 0, 0.35);
+    --t-radial: radial-gradient(1200px 800px at 50% 20%, rgba(107, 139, 164, 0.24), rgba(0, 0, 0, 0.60) 60%, rgba(0, 0, 0, 0.82) 100%);
+}
+
+/* Wire key UI elements to theme variables */
+.navbar {
+    background-color: var(--t-surfaceSolid, #1e293b);
+    border-bottom: 1px solid var(--t-border, #334155);
+    box-shadow: 0 2px 8px var(--t-shadow, rgba(0, 0, 0, 0.3));
+}
+
+.nav-btn {
+    color: var(--t-text, #e6eef3);
+}
+
+.nav-btn:hover {
+    background-color: var(--t-accent2, rgba(34, 197, 94, 0.18));
+    color: var(--t-accent, #22c55e);
+}
+
+.nav-btn.active {
+    color: var(--t-accent, #22c55e);
+    background-color: var(--t-accent2, rgba(34, 197, 94, 0.18));
+}
+
+.navbar-branding {
+    color: var(--t-accent, #22c55e);
+}
+
+.nav-stat-label {
+    color: var(--t-muted, #94a3b8);
+}
+
+.nav-stat-value {
+    color: var(--t-accent, #22c55e);
+}
+
+.theme-toggle,
+.sidebar-toggle {
+    color: var(--t-text, #e6eef3);
+}
+
+.card,
+.modal-content {
+    background: var(--t-surface, rgba(30, 41, 59, 0.70));
+    border: 1px solid var(--t-border, #334155);
+}
+
+.metric-label,
+.card-label,
+.text-muted {
+    color: var(--t-muted, #94a3b8);
+}
+
+.metric-value,
+.card-value,
+.advanced-metric-value {
+    color: var(--t-text, #e6eef3);
+}
+
+.setting-input,
+input,
+select,
+textarea {
+    background: var(--t-surfaceSolid, #1e293b);
+    color: var(--t-text, #e6eef3);
+    border: 1px solid var(--t-border, #334155);
+}
+
+.btn-primary {
+    background: var(--t-accent, #22c55e);
+    color: #0b1220;
+}
+
+.btn-secondary {
+    border-color: var(--t-border, #334155);
+    color: var(--t-text, #e6eef3);
 }
 
 .app-background {
@@ -1937,8 +2165,30 @@ body.custom-bg-enabled .main-content::before {
 
 .advanced-metric-value {
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 700;
     color: #e2e8f0;
+}
+
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    color: rgba(226, 232, 240, 0.9);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(51, 65, 85, 0.2);
+}
+
+.help-icon:hover {
+    background: rgba(51, 65, 85, 0.4);
+    border-color: rgba(148, 163, 184, 0.65);
 }
 
 .condition-toolbar {
@@ -2236,4 +2486,83 @@ body.custom-bg-enabled .main-content::before {
 
 .hidden {
     display: none !important;
+}
+
+/* ========== THEME OVERRIDES (FINAL, HIGH SPECIFICITY) ========== */
+body[data-theme] .navbar {
+    background-color: var(--t-surfaceSolid, #1e293b);
+    border-bottom-color: var(--t-border, #334155);
+    box-shadow: 0 2px 8px var(--t-shadow, rgba(0, 0, 0, 0.3));
+}
+
+body[data-theme] .sidebar-toggle,
+body[data-theme] .theme-toggle {
+    color: var(--t-text, #e6eef3);
+}
+
+body[data-theme] .navbar-branding,
+body[data-theme] .nav-stat-value {
+    color: var(--t-accent, #22c55e);
+}
+
+body[data-theme] .nav-stat-label {
+    color: var(--t-muted, #94a3b8);
+}
+
+body[data-theme] .nav-btn {
+    color: var(--t-muted, #cbd5e1);
+}
+
+body[data-theme] .nav-btn:hover {
+    background-color: var(--t-accent2, rgba(34, 197, 94, 0.10));
+    color: var(--t-accent, #22c55e);
+}
+
+body[data-theme] .nav-btn.active {
+    color: var(--t-accent, #22c55e);
+    background-color: var(--t-accent2, rgba(34, 197, 94, 0.20));
+}
+
+body[data-theme] .card,
+body[data-theme] .modal-content {
+    background: var(--t-surface, rgba(30, 41, 59, 0.70));
+    border-color: var(--t-border, #334155);
+}
+
+body[data-theme] .metric-label,
+body[data-theme] .card-label,
+body[data-theme] .text-muted {
+    color: var(--t-muted, #94a3b8);
+}
+
+body[data-theme] .metric-value,
+body[data-theme] .card-value,
+body[data-theme] .advanced-metric-value {
+    color: var(--t-text, #e6eef3);
+}
+
+body[data-theme] .setting-input,
+body[data-theme] input,
+body[data-theme] select,
+body[data-theme] textarea {
+    background: var(--t-surfaceSolid, #1e293b);
+    color: var(--t-text, #e6eef3);
+    border-color: var(--t-border, #334155);
+}
+
+body[data-theme] .btn-primary {
+    background: var(--t-accent, #22c55e);
+}
+
+body[data-theme] .btn-secondary {
+    border-color: var(--t-border, #334155);
+    color: var(--t-text, #e6eef3);
+}
+
+body[data-theme] .fab {
+    background-color: var(--t-accent, #22c55e);
+}
+
+body[data-theme] .fab:hover {
+    filter: brightness(0.92);
 }
